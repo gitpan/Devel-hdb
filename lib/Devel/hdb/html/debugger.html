@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>hdb</title>
+    <!-- Bootstrap -->
+    <link href="db/bootstrap.css" rel="stylesheet" media="screen">
+    <link href="db/debugger.css" rel="stylesheet" media="screen">
+    <script src="db/jquery.js"></script>
+    <script src="db/bootstrap.js"></script>
+    <script src="db/handlebars.js"></script>
+    <script src="db/perlvalue.js"></script>
+    <script src="db/filemanager.js"></script>
+    <script src="db/stackmanager.js"></script>
+    <script src="db/jquery.scrollTo.js"></script>
+    <script src="db/debugger.js"></script>
+    <script>
+        $(document).ready(function() {
+            var d = new Debugger('div.debugger-window');
+            d.run();
+        });
+    </script>
+    <! template for Bootstrap nav tabs>
+    <script id="nav-tab-template" type="text/x-handlebars-template">
+        <li{{#id}} id="{{id}}"{{/id}} class="stack-tab {{class}}{{#active}} active{{/active}}">
+        </li>
+    </script>
+
+    <! template for Bootstrap nav tabs contents>
+    <script id="nav-tab-content-template" type="text/x-handlebars-template">
+            <a href="#{{tabId}}" data-toggle="tab" rel="tooltip" data-html="true" data-placement="right" title="{{longlabel}}<br>{{filename}}: {{lineno}}">{{label}}</a>
+    </script>
+
+    <! template for Bootstrap nav panes>
+    <script id="nav-pane-template" type="text/x-handlebars-template">
+        <div id="{{tabId}}" class="tab-pane managed-height program-code-container{{#active}} active{{/active}}" data-filename="{{filename}}">
+            {{{html}}}
+        </div>
+    </script>
+
+    <! template for program file contents>
+    <script id="program-listing-template" type="text/x-handlebars-template">
+        <table class="table table-hover table-condensed program-code" data-filename="{{filename}}">
+            <tbody>
+                {{#rows}}
+                    <tr class="{{#active}}active{{/active}}{{#unbreakable}} unbreakable{{/unbreakable}}{{#breakpoint}} breakpoint{{/breakpoint}}{{#inactivebreakpoint}} inactive-breakpoint{{/inactivebreakpoint}}{{#action}} bpaction{{/action}}" data-line="{{line}}">
+                        <td class="lineno"><span>{{line}}</span></td>
+                        <td class="code">{{code}}</td>
+                    </tr>
+                {{/rows}}
+            </tbody>
+        </table>
+    </script>
+
+    <! template for watched expression>
+    <script id="watched-expr-template" type="text/x-handlebars-template">
+        <div class="watched-expression" data-expr="{{expr}}">
+            <span>
+                <span class="remove-watched-expression close-button">
+                    <i class="icon-remove-sign icon-white"></i>
+                </span>
+            </span>
+            <span class="expr label label-inverse">{{expr}}</span>
+            <span>: </span>
+            <span class="value">{{value}}</span>
+        </div>
+    </script>
+
+    <! template for the breakpoint right-click menu>
+    <script id="breakpoint-right-click-template" type="text/x-handlebars-template">
+        <div>
+            <i class="icon-stop"></i> <span class="breakpoint-condition" data-filename="{{filename}}" data-lineno="{{lineno}}">
+                {{#ifDefined condition}}<span>{{condition}}</span>
+                {{else}}<span class="label">none</span>{{/ifDefined}}
+                </span>
+        </div>
+        <div>
+            <i class="icon-tasks"></i> <span class="action" data-filename="{{filename}}" data-lineno="{{lineno}}">
+                {{#ifDefined action}}<span>{{action}}</span>
+                {{else}}<span class="label">none</span>{{/ifDefined}}
+                </span>
+        </div>
+    </script>
+
+</head>
+<body>
+    <div id="columnator" class="debugger-window">
+        <div class="container-column">
+            <div class="row">
+                <div id="controls" class="span6 offset1">
+                    <a class="btn control-button" id="stepin" href="stepin">Step In</a>
+                    <a class="btn control-button" id="stepover" href="stepover">Step Over</a>
+                    <a class="btn control-button" id="stepout" href="stepout">Step Out</a>
+                    <a class="btn btn-primary control-button" id="continue" href="continue">Run</a>
+
+                    <a class="btn btn-danger control-button pull-right" id="exit" href="exit">Exit</a>
+                </div>
+            </div>
+
+            <div id="filewindow" class="tabbable">
+                <ul class="nav nav-tabs">
+                    <li id="program-name" class="active"><a href="#stack" data-toggle="tab">Program Name</a></li>
+                    <li><span id="add-file"><i class="icon-plus"></i></span></li>
+                </ul>
+                <div id="file-content" class="tab-content">
+                    <div id="stack" class="tab-pane active tabbable tabs-left">
+                        <ul id="stack-tabs" class="nav nav-tabs managed-height"></ul>
+                        <div class="tab-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="drag-divider" class="container-column managed-height"></div>
+        <div id="watch-expressions" class="container-column">
+            <div id="watch-expressions-title">
+            <strong>Watch Expressions</strong>
+                <span id="add-watch-expr"><i class="icon-plus"></i></span>
+            </div>
+            <div id="watch-expressions-container" class="managed-height"></div>
+        </div>
+    </div>
+</body>
+</html>

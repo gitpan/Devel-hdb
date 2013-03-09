@@ -1,0 +1,197 @@
+/* the time after "run" is pressed, but before another breakpoint */
+.control-button[disabled] {
+    cursor: wait;
+}
+
+table.program-code td {
+    border-top: 0px;
+    padding-top: 0px;
+    padding-bottom: 1px;
+}
+table.program-code tr.active td.code  {
+    background-color: rgba(0,101,204,1);
+}
+table.program-code td.lineno span {
+    width: 2em;
+    border-radius: 50% 50%;
+    border: 1px solid transparent;
+    padding: 1px;
+    display: inline-block;
+    text-align: center;
+}
+table.program-code tr.breakpoint td.lineno span {
+    background-color: rgba(255,0,0,1);
+}
+table.program-code tr.conditional-breakpoint td.lineno span {
+    background-color: rgba(0,0,255,1);
+}
+table.program-code tr.inactive-breakpoint td.lineno span  {
+    background-color: rgba(255,0,0,0.4);
+}
+table.program-code tr.bpaction td.lineno span {
+    border-color: black;
+}
+table.program-code tr.unbreakable td.lineno {
+    text-decoration: line-through;
+}
+
+.code {
+    font-family: monospace;
+    white-space: pre;
+}
+
+div#controls {
+    /* leave space above and below the control buttons */
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+
+#add-file  {
+    padding: 0.2em;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+.close-button {
+    height: 18px;
+    width: 18px;
+    display: inline-block;
+    background-color: red;
+    border-radius: 50%;
+    text-align: center;
+}
+.close-button > i {
+    margin: 0;
+    vertical-align: center;
+}
+#file-content {
+    /*clear:both;*/
+}
+
+#stack-tabs {
+    padding-top: 1em;
+    margin-bottom: 0;
+    margin-right: 0.1em;
+}
+#stack-tabs .active a  {
+    box-shadow: -2px 10px 3px -2px;
+}
+
+
+
+/* These make the tabs across the top wider and darker than
+   in the basic Bootstrap stuff */
+#filewindow > ul {
+    border-bottom: 2px solid rgb(170, 170, 170);
+    margin-bottom: 0;
+}
+#filewindow > ul > li {
+    margin-bottom: -2px;
+}
+#filewindow > ul a {
+    background-color: white;
+    border-top: 2px solid rgb(170, 170, 170);
+    border-left: 2px solid rgb(170, 170, 170);
+    border-right: 2px solid rgb(170, 170, 170);
+}
+
+
+#filewindow {
+    border-top: 1px solid black;
+    border-right: 1px solid black;
+    border-top-right-radius: 1%;
+    background-color: rgb(240, 240, 240);
+}
+#file-content {
+    background-color: white;
+}
+
+div.managed-height {
+    overflow: scroll;
+}
+div#stack-tab-container {
+    display: inline-block;
+}
+
+div.program-code-container {
+    /* border: 1px solid black; */
+    /* overflow: scroll; */
+}
+
+body {
+    min-width: 550px;
+}
+#columnator {
+    padding-left: 0;
+    padding-right: 250px;
+}
+#columnator > :first-child {
+    float: left;
+    width: 100%;
+}
+.container-column {
+    position: relative;
+    float: left;
+}
+#drag-divider {
+    width: 3px;
+    float: left;
+    background: transparent;
+    cursor: col-resize;
+    margin-right: -4px;
+    display: inline-block;
+    z-index: 10;
+}
+#ghost-divider {
+    width: 3px;
+    background: black;
+    opacity: 0.5;
+    position: absolute;
+    cursor: col-resize;
+    z-index: 99;
+}
+
+#watch-expressions {
+    float: left;
+    width: 249px;  /* leave 1px for the #filewindow border */
+    margin-right: -250px;
+    overflow: scroll;
+/*    margin-left: 0.5em;*/
+}
+div#watch-expressions-title {
+    margin-bottom: 0.25em;
+    padding-bottom: 0.25em;
+    padding-left: 1em;
+    border-bottom: 1px solid black;
+}
+
+.watched-expression {
+    border-bottom: 1px solid black;
+    padding-left: 0.25em;
+    padding-bottom: 0.25em;
+}
+
+/* The right-click breakpoint menu */
+.breakpoint-condition {
+    display: inline-block;
+    height: 2em;
+}
+.breakpoint-condition form {
+    display: inline-block;
+    margin-bottom: 0;
+}
+.breakpoint-condition input {
+    margin-bottom: 0;
+}
+.action {
+    display: inline-block;
+    height: 2em;
+}
+.action form {
+    display: inline-block;
+    margin-bottom: 0;
+}
+.action input {
+    margin-bottom: 0;
+}

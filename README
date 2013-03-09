@@ -1,0 +1,13 @@
+
+
+This archive contains the distribution Devel-hdb,
+version 0.01:
+
+  A Perl debugger implemented as a REST service and accompanying browser program
+
+This software is copyright (c) 2013 by Anthony Brummett <brummett@cpan.org>.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
+

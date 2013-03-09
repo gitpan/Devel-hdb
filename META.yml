@@ -1,0 +1,35 @@
+---
+abstract: 'A Perl debugger implemented as a REST service and accompanying browser program'
+author:
+  - 'Anthony Brummett <brummett@cpan.org>'
+build_requires:
+  Exporter: 0
+  File::Basename: 0
+  File::Temp: 0
+  IO::Socket: 0
+  Test::More: 0
+  Time::HiRes: 0
+  WWW::Mechanize: 0
+configure_requires:
+  ExtUtils::MakeMaker: 6.30
+dynamic_config: 0
+generated_by: 'Dist::Zilla version 4.300030, CPAN::Meta::Converter version 2.120921'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: Devel-hdb
+requires:
+  Data::Dumper: 0
+  HTTP::Server::PSGI: 0
+  IO::File: 0
+  IO::Socket::INET: 0
+  JSON: 0
+  Plack::Request: 0
+  Scalar::Util: 0
+  Socket: 0
+  Sub::Install: 0
+  strict: 0
+  vars: 0
+  warnings: 0
+version: 0.01
