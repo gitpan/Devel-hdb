@@ -3,6 +3,8 @@ use strict;
 
 package Devel::hdb::DB;
 
+use Scalar::Util;
+
 package DB;
 no strict;
 
@@ -178,6 +180,58 @@ sub hdbStackTracker::DESTROY {
     $DB::single = 1 if (defined($DB::step_over_depth) and $DB::step_over_depth >= $stack_depth);
 }
 
+# Count how many stack frames we should discard when we're
+# interested in the debugged program's stack frames
+sub _first_program_frame {
+    for(my $level = 1;
+        my ($package, $filename, $line, $subroutine) = caller($level);
+        $level++
+    ) {
+        if ($subroutine eq 'DB::DB') {
+            return $level;
+        }
+    }
+    return;
+}
+
+
+sub get_var_at_level {
+    my($class, $varname, $level) = @_;
+
+    require PadWalker;
+
+    my $h = PadWalker::peek_my( $level || 1);
+
+    unless (exists $h->{$varname}) {
+        # not a lexical, try our()
+        $h = PadWalker::peek_our( $level || 1);
+    }
+
+    unless (exists $h->{$varname}) {
+        # last chance, see if it's a package var
+
+        if (my($sigil, $bare_varname) = ($varname =~ m/^([\$\@\%\*])(\w+)$/)) {
+            # a varname without a pacakge, try in the package at
+            # that caller level
+            my($package) = caller($level+1);
+            $package ||= 'main';
+
+            my $expanded_varname = $sigil . $package . '::' . $bare_varname;
+            $expanded_varname = _fixup_expr_for_eval($expanded_varname);
+            my @value = eval( $expanded_varname );
+            return @value < 2 ? $value[0] : \@value;
+
+        } elsif ($varname =~ m/^[\$\@\%\*]\w+(::\w+)*(::)?$/) {
+            $varname = _fixup_expr_for_eval($varname);
+            my @value = eval($varname);
+            return @value < 2 ? $value[0] : \@value;
+        }
+    }
+
+    return unless exists($h->{$varname});
+    return ${ $h->{$varname} };
+}
+
 sub set_breakpoint {
     my $class = shift;
     my $filename = shift;
@@ -276,14 +330,21 @@ sub prepare_eval {
     }
 }
 
+# This substitution is done so that we return HASH, as opposed to a list
+# An expression of %hash results in a list of key/value pairs that can't
+# be distinguished from a list.  A glob gets replaced by a glob ref.
+sub _fixup_expr_for_eval {
+    my($expr) = @_;
+
+    $expr =~ s/^\s*([%*])/\\$1/o;
+    return $expr;
+}
+
 sub eval {
 
     local($^W) = 0;  # no warnings
 
-    # This substitution is done so that we return HASH, as opposed to an ARRAY.
-    # An expression of %hash results in a list of key/value pairs.
-    # A glob gets replaced by a glob ref
-    $eval_string =~ s/^\s*([%*])/\\$1/o;
+    $eval_string = _fixup_expr_for_eval($eval_string);
 
     local @result;
     {

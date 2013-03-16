@@ -1,3 +1,4 @@
+CHANGES
 LICENSE
 MANIFEST
 META.yml
@@ -42,5 +43,8 @@ t/06-eval.t
 t/07-step-out.t
 t/08-action.t
 t/09-AUTOLOAD.t
+t/10-function-args.t
+t/11-getvar.t
+t/12-request_id.t
 t/HdbHelper.pm
 t/TestNothing.pm

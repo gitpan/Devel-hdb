@@ -5,14 +5,13 @@ package Devel::hdb::App;
 
 BEGIN {
     our $PROGRAM_NAME = $0;
+    our @saved_ARGV = @ARGV;
 }
 
 use Devel::hdb::Server;
 use Plack::Request;
-use Sub::Install;
 use IO::File;
 use JSON qw();
-use Data::Dumper;
 use Scalar::Util;
 
 use Devel::hdb::Router;
@@ -33,7 +32,7 @@ sub new {
                     );
     $self->{json} = JSON->new();
 
-    $parent_pid = getppid() if ($Devel::hdb::TESTHARNESS);
+    $parent_pid = eval { getppid() } if ($Devel::hdb::TESTHARNESS);
     return $self;
 }
 
@@ -79,6 +78,7 @@ sub init_debugger {
         $_->get("/loadedfiles", sub { $self->loaded_files(@_) });
         $_->get("/exit", sub { $self->do_terminate(@_) });
         $_->post("/eval", sub { $self->do_eval(@_) });
+        $_->post("/getvar", sub { $self->do_getvar(@_) });
     }
 }
 
@@ -102,6 +102,11 @@ sub do_terminate {
     };
 }
 
+sub _resp {
+    my $self = shift;
+    return Devel::hdb::App::Response->new(@_);
+}
+
 # Evaluate some expression in the debugged program's context.
 # It works because when string-eval is used, and it's run from
 # inside package DB, then magic happens where it's evaluate in
@@ -113,7 +118,8 @@ sub do_eval {
     my($self, $env) = @_;
     my $req = Plack::Request->new($env);
     my $eval_string = $DB::eval_string = $req->content();
-    my $json = $self->{json};
+
+    my $resp = $self->_resp('evalresult', $env);
 
     return sub {
         my $responder = shift;
@@ -127,7 +133,8 @@ sub do_eval {
                     my $data = shift;
                     $data->{result} = $self->_encode_eval_data($data->{result}) if ($data->{result});
                     $data->{expr} = $eval_string;
-                    $writer->write($json->encode({ type => 'evalresult', data => $data }));
+                    $resp->data($data);
+                    $writer->write($resp->encode());
                     $writer->close();
                 }
             )
@@ -167,6 +174,8 @@ sub _encode_eval_data {
             $value = $copy;
         } elsif ($reftype eq 'REF') {
             $value = $self->_encode_eval_data($$value);
+        } elsif ($reftype eq 'REGEXP') {
+            $value = $value . '';
         }
 
         $value = { __reftype => $reftype, __refaddr => $refaddr, __value => $value };
@@ -179,11 +188,45 @@ sub _encode_eval_data {
 sub loaded_files {
     my($self, $env) = @_;
 
+    my $resp = $self->_resp('loadedfiles', $env);
+
     my @files = DB->loaded_files();
+    $resp->data(\@files);
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $self->encode({   type => 'loadedfiles',
-                                data => \@files }) ]];
+            [ $resp->encode() ]
+        ];
+}
+
+# Get the value of a variable, possibly in an upper stack frame
+sub do_getvar {
+    my($self, $env) = @_;
+    my $req = Plack::Request->new($env);
+    my $level = $req->param('l');
+    my $varname = $req->param('v');
+
+    my $resp = $self->_resp('getvar', $env);
+    my $adjust = DB->_first_program_frame();
+    my $value = eval { DB->get_var_at_level($varname, $level + $adjust) };
+
+    if ($@) {
+        if ($@ =~ m/Can't locate PadWalker/) {
+            $resp->{type} = 'error';
+            $resp->data('Not implemented - PadWalker module is not available');
+
+        } elsif ($@ =m/Not nested deeply enough/) {
+            $resp->data( { expr => $varname, level => $level, result => undef } );
+        } else {
+            die $@;
+        }
+    } else {
+        $value = $self->_encode_eval_data($value);
+        $resp->data( { expr => $varname, level => $level, result => $value } );
+    }
+    return [ 200,
+            [ 'Content-Type' => 'application/json' ],
+            [ $resp->encode() ]
+        ];
 }
 
 
@@ -203,19 +246,21 @@ sub set_breakpoint {
         return [ 403, ['Content-Type' => 'text/html'], ["line $line of $filename is not breakable"]];
     }
 
+    my $resp = $self->_resp('breakpoint', $env);
+
     my $params = $req->parameters;
     my %req;
     $req{condition} = $condition if (exists $params->{'c'});
     $req{action} = $action if (exists $params->{'a'});
 
-
     DB->set_breakpoint($filename, $line, %req);
+
+    $resp->data( DB->get_breakpoint($filename, $line) );
 
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $self->encode({   type => 'breakpoint',
-                                data => DB->get_breakpoint($filename, $line)
-                            }) ]];
+            [ $resp->encode() ]
+          ];
 }
 
 
@@ -226,10 +271,12 @@ sub get_breakpoint {
     my $filename = $req->param('f');
     my $line = $req->param('l');
 
+    my $resp = $self->_resp('breakpoint', $env);
+    $resp->data( DB->get_breakpoint($filename, $line) );
+
     return [ 200, ['Content-Type' => 'application/json'],
-            [ $self->encode({   type => 'breakpoint',
-                                data => DB->get_breakpoint($filename, $line) })
-            ]];
+            [ $resp->encode() ]
+          ];
 }
 
 sub get_all_breakpoints {
@@ -237,8 +284,12 @@ sub get_all_breakpoints {
     my $req = Plack::Request->new($env);
     my $filename = $req->param('f');
     my $line = $req->param('l');
+    my $rid = $req->param('rid');
 
-    my @bp = map {  { type => 'breakpoint', data => $_ } } DB->get_breakpoint($filename, $line);
+    # Purposefully not using a response object because there's not yet
+    # clean way to encode a list of them
+    my @bp = map {  { type => 'breakpoint', data => $_, defined($rid) ? (rid => $rid) : () } }
+            DB->get_breakpoint($filename, $line);
     return [ 200, ['Content-Type' => 'application/json'],
             [ $self->encode( \@bp ) ]
         ];
@@ -246,10 +297,16 @@ sub get_all_breakpoints {
 
 # Return the name of the program, $o
 sub program_name {
+    my($self, $env) = @_;
+
+    my $resp = $self->_resp('program_name', $env);
+
     our $PROGRAM_NAME;
+    $resp->data($PROGRAM_NAME);
+
     return [200, ['Content-Type' => 'text/plain'],
-                [ shift->encode({   type => 'program_name',
-                                    data => $PROGRAM_NAME }) ]];
+                [ $resp->encode() ]
+        ];
 }
 
 
@@ -259,6 +316,7 @@ sub program_name {
 sub sourcefile {
     my($self, $env) = @_;
     my $req = Plack::Request->new($env);
+    my $resp = $self->_resp('sourcefile', $env);
 
     my $filename = $req->param('f');
     my $file;
@@ -278,24 +336,24 @@ sub sourcefile {
         }
     }
 
+    $resp->data({ filename => $filename, lines => \@rv});
+
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $self->encode({   type => 'sourcefile',
-                                data => {
-                                    filename => $filename,
-                                    lines => \@rv,
-                                }
-                            }) ]];
+            [ $resp->encode() ]
+        ];
 }
 
 # Send back a data structure describing the call stack
 # stepin, stepover, stepout and run will call this to return
 # back to the debugger window the current state
 sub _stack {
+    my $self = shift;
 
     my $discard = 1;
     my @stack;
     my $next_AUTOLOAD_name = $#DB::AUTOLOAD_names;
+    our @saved_ARGV;
 
     for (my $i = 0; ; $i++) {
         my %caller;
@@ -311,7 +369,7 @@ sub _stack {
         }
         next if $discard;
 
-#        $caller{args} = \@DB::args;
+        $caller{args} = [ map { $self->_encode_eval_data($_) } @DB::args ]; # unless @stack;
         $caller{subname} = $caller{subroutine} =~ m/\b(\w+$|__ANON__)/ ? $1 : $caller{subroutine};
         if ($caller{subname} eq 'AUTOLOAD') {
             $caller{subname} .= '(' . ($DB::AUTOLOAD_names[ $next_AUTOLOAD_name-- ] =~ m/::(\w+)$/)[0] . ')';
@@ -322,10 +380,11 @@ sub _stack {
     }
     # TODO: put this into the above loop
     for (my $i = 0; $i < @stack-1; $i++) {
-        @{$stack[$i]}{'subroutine','subname'} = @{$stack[$i+1]}{'subroutine','subname'};
+        @{$stack[$i]}{'subroutine','subname','args'} = @{$stack[$i+1]}{'subroutine','subname','args'};
     }
     $stack[-1]->{subroutine} = 'MAIN';
     $stack[-1]->{subname} = 'MAIN';
+    $stack[-1]->{args} = \@saved_ARGV; # These are guaranteed to be simple scalars, no need to encode
 
     return \@stack;
 }
@@ -333,10 +392,13 @@ sub _stack {
 sub stack {
     my($self, $env) = @_;
 
+    my $resp = $self->_resp('stack', $env);
+    $resp->data( $self->_stack );
+
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $self->encode({   type => 'stack',
-                                data => $self->_stack }) ]];
+            [ $resp->encode() ]
+        ];
 }
 
 
@@ -408,6 +470,9 @@ sub _delay_stack_return_to_client {
     my $self = shift;
     my $env = shift;
 
+    my $req = Plack::Request->new($env);
+    my $rid = $req->param('rid');
+
     my $json = $self->{json};
     return sub {
         my $responder = shift;
@@ -421,7 +486,8 @@ sub _delay_stack_return_to_client {
                 push @messages, shift;
                 return;
             }
-            unshift @messages, { type => 'stack', data => $self->_stack };
+            # Purposefully not using a response object since we can't encode a list of them
+            unshift @messages, { type => 'stack', rid => $rid, data => $self->_stack };
             $writer->write($json->encode(\@messages));
             $writer->close();
         });
@@ -431,7 +497,6 @@ sub _delay_stack_return_to_client {
 sub app {
     my $self = shift;
     unless ($self->{app}) {
-        #$self->{app} =  sub { print "run route for ".Data::Dumper::Dumper($_[0]);$self->{router}->route(@_); };
         $self->{app} =  sub { $self->{router}->route(@_); };
     }
     return $self->{app};
@@ -442,5 +507,37 @@ sub run {
     return $self->{server}->run($self->app);
 }
 
+
+package Devel::hdb::App::Response;
+
+sub new {
+    my($class, $type, $env) = @_;
+
+    my $self = { type => $type };
+
+    if ($env) {
+        my $req = Plack::Request->new($env);
+        my $rid = $req->param('rid');
+        if (defined $rid) {
+            $self->{rid} = $rid;
+        }
+    }
+    bless $self, $class;
+}
+
+sub encode {
+    my $self = shift;
+
+    my %copy = map { exists($self->{$_}) ? ($_ => $self->{$_}) : () } keys %$self;
+    return JSON::encode_json(\%copy);
+}
+
+sub data {
+    my $self = shift;
+    if (@_) {
+        $self->{data} = shift;
+    }
+    return $self->{data};
+}
 
 1;

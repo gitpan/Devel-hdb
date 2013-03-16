@@ -3,6 +3,12 @@
     cursor: wait;
 }
 
+.PerlValue {
+    zoom: 80%;
+}
+.program-code {
+    /* zoom: 80%; */
+}
 table.program-code td {
     border-top: 0px;
     padding-top: 0px;
@@ -96,6 +102,17 @@ div#controls {
     border-right: 2px solid rgb(170, 170, 170);
 }
 
+.current-sub-and-args {
+    margin-bottom: 0;
+}
+.current-sub-and-args ul.sub-arg-list {
+    display: inline;
+    list-style: none; margin: 0; padding: 0;
+}
+.current-sub-and-args ul.sub-arg-list li { display: inline; }
+.current-sub-and-args ul.sub-arg-list li:after { content: ","; }
+.current-sub-and-args ul.sub-arg-list li:last-child:after { content: ""; }
+
 
 #filewindow {
     border-top: 1px solid black;
@@ -108,7 +125,7 @@ div#controls {
 }
 
 div.managed-height {
-    overflow: scroll;
+    overflow: auto;
 }
 div#stack-tab-container {
     display: inline-block;
@@ -156,7 +173,6 @@ body {
     float: left;
     width: 249px;  /* leave 1px for the #filewindow border */
     margin-right: -250px;
-    overflow: scroll;
 /*    margin-left: 0.5em;*/
 }
 div#watch-expressions-title {
@@ -194,4 +210,8 @@ div#watch-expressions-title {
 }
 .action input {
     margin-bottom: 0;
+}
+
+.hovered-perl-var {
+    background-color: rgba(255,255,0,0.3);
 }

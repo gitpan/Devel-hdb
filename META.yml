@@ -20,16 +20,15 @@ meta-spec:
   version: 1.4
 name: Devel-hdb
 requires:
-  Data::Dumper: 0
   HTTP::Server::PSGI: 0
   IO::File: 0
   IO::Socket::INET: 0
   JSON: 0
+  PadWalker: 0
   Plack::Request: 0
   Scalar::Util: 0
   Socket: 0
-  Sub::Install: 0
   strict: 0
   vars: 0
   warnings: 0
-version: 0.01
+version: 0.02

@@ -28,20 +28,19 @@ my %WriteMakefileArgs = (
   "LICENSE" => "perl",
   "NAME" => "Devel::hdb",
   "PREREQ_PM" => {
-    "Data::Dumper" => 0,
     "HTTP::Server::PSGI" => 0,
     "IO::File" => 0,
     "IO::Socket::INET" => 0,
     "JSON" => 0,
+    "PadWalker" => 0,
     "Plack::Request" => 0,
     "Scalar::Util" => 0,
     "Socket" => 0,
-    "Sub::Install" => 0,
     "strict" => 0,
     "vars" => 0,
     "warnings" => 0
   },
-  "VERSION" => "0.01",
+  "VERSION" => "0.02",
   "test" => {
     "TESTS" => "t/*.t"
   }
