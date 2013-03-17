@@ -3,11 +3,11 @@ use strict;
 
 package Devel::hdb;
 
-our $VERSION = 0.02;
-
 use Devel::hdb::App;
 use Devel::hdb::DB;
 use IO::Socket::INET;
+
+our $VERSION = 0.03;
 
 sub import {
     my $class = shift;
