@@ -44,7 +44,7 @@
     <script id="program-listing-template" type="text/x-handlebars-template">
         <div class="program-code" data-filename="{{filename}}">
             {{#rows}}
-                <div class="{{#active}}active{{/active}}{{#unbreakable}} unbreakable{{/unbreakable}}{{#breakpoint}} breakpoint{{/breakpoint}}{{#inactivebreakpoint}} inactive-breakpoint{{/inactivebreakpoint}}{{#action}} bpaction{{/action}} code-line" data-line="{{line}}">
+                <div class="{{#active}}active{{/active}}{{#unbreakable}} unbreakable{{/unbreakable}}{{#breakpoint}} breakpoint{{/breakpoint}}{{#inactivebreakpoint}} inactive-breakpoint{{/inactivebreakpoint}}{{#action}} bpaction{{/action}} code-line" data-lineno="{{line}}">
                     <span class="lineno"><span>{{line}}</span></span>
                     <span class="code">{{code}}</span>
                 </div>
@@ -78,20 +78,48 @@
         </div>
     </script>
 
+    <! template for a breakpoint condition in the breakpoint menu/list>
+    <script id="breakpoint-condition-template" type="text/x-handlebars-template">
+        {{#ifDefined condition}}<span>{{condition}}</span>
+        {{else}}<span class="label">none</span>{{/ifDefined}}
+    </script>
+    <! template for a breakpoint action in the breakpoint menu/list>
+    <script id="breakpoint-action-template" type="text/x-handlebars-template">
+        {{#ifDefined action}}<span>{{action}}</span>
+        {{else}}<span class="label">none</span>{{/ifDefined}}
+    </script>
     <! template for the breakpoint right-click menu>
     <script id="breakpoint-right-click-template" type="text/x-handlebars-template">
-        <div>
-            <i class="icon-stop"></i> <span class="breakpoint-condition" data-filename="{{filename}}" data-lineno="{{lineno}}">
-                {{#ifDefined condition}}<span>{{condition}}</span>
-                {{else}}<span class="label">none</span>{{/ifDefined}}
+        <div class="breakpoint-marker" data-filename="{{filename}}" data-lineno="{{lineno}}">
+            <div>
+                <input type="checkbox" class="toggle-breakpoint" {{#if conditionEnabled}}checked="checked"{{/if}}>
+                <i class="icon-stop"></i>&nbsp;
+                <span class="breakpoint-condition">
+                    {{>breakpoint-condition-template}}
                 </span>
-        </div>
-        <div>
-            <i class="icon-tasks"></i> <span class="action" data-filename="{{filename}}" data-lineno="{{lineno}}">
-                {{#ifDefined action}}<span>{{action}}</span>
-                {{else}}<span class="label">none</span>{{/ifDefined}}
+            </div>
+            <div>
+                <input type="checkbox" class="toggle-action" {{#if actionEnabled}}checked="checked"{{/if}}>
+                <i class="icon-tasks"></i>&nbsp;
+                <span class="action">
+                    {{>breakpoint-action-template}}
                 </span>
+            </div>
         </div>
+    </script>
+
+    <! template for an item in the breakpoints pane list>
+    <script id="breakpoint-list-item-template" type="text/x-handlebars-template">
+        <li class="breakpoint-list-item" data-filename="{{filename}}" data-lineno="{{lineno}}">
+            <div>
+                <span class="remove-breakpoint close-button">
+                    <i class="icon-remove-sign icon-white"></i>
+                </span>
+                <small>line {{lineno}}</small>
+                <i class="icon-share-alt breakpoint-goto"></i>
+            </div>
+            {{> breakpoint-right-click-template}}
+        </li>
     </script>
 
 </head>
@@ -123,12 +151,24 @@
             </div>
         </div>
         <div id="drag-divider" class="container-column managed-height"></div>
-        <div id="watch-expressions" class="container-column">
-            <div id="watch-expressions-title">
-            <strong>Watch Expressions</strong>
-                <span id="add-watch-expr"><i class="icon-plus"></i></span>
+        <div id="side-tray" class="container-column">
+            <div id="breakpoint-container" class="container-column">
+                <div id="breakpoints" class="container-column managed-height">
+                    <strong>Breakpoints</strong>
+                    <ol id="breakpoints-list"></ul>
+                </div>
+                <div id="breakpoint-container-handle" class="container-column managed-height">
+                    <div style="height: 50%"></div>
+                    <i id="breakpoint-container-handle-icon" class="icon-chevron-right"></i>
+                </div>
             </div>
-            <div id="watch-expressions-container" class="managed-height"></div>
+            <div id="watch-expressions" class="container-column managed-height">
+                <div id="watch-expressions-title">
+                    <strong>Watch Expressions</strong>
+                    <span id="add-watch-expr"><i class="icon-plus"></i></span>
+                </div>
+                <div id="watch-expressions-container" class="managed-height"></div>
+            </div>
         </div>
     </div>
 </body>

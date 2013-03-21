@@ -231,14 +231,16 @@ sub do_getvar {
 
 
 # sets a breakpoint on line l of file f with condition c
-# Make c=1 for an unconditional bp, c=0 to clear it
+# Make c=1 for an unconditional bp, c='' to clear it
 sub set_breakpoint {
     my($self, $env) = @_;
     my $req = Plack::Request->new($env);
     my $filename = $req->param('f');
     my $line = $req->param('l');
     my $condition = $req->param('c');
+    my $condition_inactive = $req->param('ci');
     my $action = $req->param('a');
+    my $action_inactive = $req->param('ai');
 
     if (! DB->is_loaded($filename)) {
         return [ 404, ['Content-Type' => 'text/html'], ["$filename is not loaded"]];
@@ -251,11 +253,18 @@ sub set_breakpoint {
     my $params = $req->parameters;
     my %req;
     $req{condition} = $condition if (exists $params->{'c'});
+    $req{condition_inactive} = $condition_inactive if (exists $params->{'ci'});
     $req{action} = $action if (exists $params->{'a'});
+    $req{action_inactive} = $action_inactive if (exists $params->{'ai'});
 
     DB->set_breakpoint($filename, $line, %req);
 
-    $resp->data( DB->get_breakpoint($filename, $line) );
+    my $resp_data = DB->get_breakpoint($filename, $line);
+    unless ($resp_data) {
+        # This breakpoint was deleted
+        $resp_data = { filename => $filename, lineno => $line };
+    }
+    $resp->data( $resp_data );
 
     return [ 200,
             [ 'Content-Type' => 'application/json' ],

@@ -36,12 +36,14 @@ t/04-breakpoint-in-code.t
 t/04-breakpoint.t
 t/04-conditional-breakpoint.t
 t/04-get-all-breakpoints.t
+t/04-inactive-brekpoint.t
 t/05-loaded-files.t
 t/05-source-file.t
 t/06-eval-blessed.t
 t/06-eval.t
 t/07-step-out.t
 t/08-action.t
+t/08-inactive-action.t
 t/09-AUTOLOAD.t
 t/10-function-args.t
 t/11-getvar.t
