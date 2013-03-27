@@ -6,7 +6,12 @@ use HdbHelper;
 use WWW::Mechanize;
 use JSON;
 
-use Test::More tests => 12;
+use Test::More;
+if ($^O =~ m/^MS/) {
+    plan skip_all => 'Test hangs on Windows';
+} else {
+    plan tests => 12;
+}
 
 my $url = start_test_program();
 
@@ -48,7 +53,7 @@ $resp = $mech->get($url.'continue');
 ok($resp->is_success, 'continue');
 $stack = $json->decode($resp->content);
 # Make sure it didn't stop on line 4 - it has an action but no breakpoint
-is($stack->[0]->{data}->[0]->{line}, 6, 'Stopped on line 6');
+is($stack->{data}->[0]->{line}, 6, 'Stopped on line 6');
 $resp = $mech->post("${url}eval", content => '$a');
 ok($resp->is_success, 'Get value of $a');
 $answer = $json->decode($resp->content);

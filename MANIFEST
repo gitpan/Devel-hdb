@@ -48,5 +48,11 @@ t/09-AUTOLOAD.t
 t/10-function-args.t
 t/11-getvar.t
 t/12-request_id.t
+t/13-ping.t
+t/14-fork.t
+t/15-continue-nostop.t
+t/16-load-breakpoints.t
+t/16-save-breakpoints.t
+t/16-startup-load-breakpoints.t
 t/HdbHelper.pm
 t/TestNothing.pm

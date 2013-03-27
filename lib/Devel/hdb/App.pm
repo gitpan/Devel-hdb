@@ -6,6 +6,7 @@ package Devel::hdb::App;
 BEGIN {
     our $PROGRAM_NAME = $0;
     our @saved_ARGV = @ARGV;
+    our $ORIGINAL_PID = $$;
 }
 
 use Devel::hdb::Server;
@@ -13,27 +14,42 @@ use Plack::Request;
 use IO::File;
 use JSON qw();
 use Scalar::Util;
+use LWP::UserAgent;
+use Data::Dumper;
 
 use Devel::hdb::Router;
 
 use vars qw( $parent_pid ); # when running in the test harness
 
-sub new {
+our $APP_OBJ;
+sub get {
+    return $APP_OBJ if $APP_OBJ;  # get() is a singleton
+
     my $class = shift;
-    my %server_params = (host => $Devel::hdb::HOST || '127.0.0.1', @_);
 
-    my $self = bless {}, $class;
+    my $self = $APP_OBJ = bless {}, $class;
 
-    $server_params{'port'} = $Devel::hdb::PORT if defined $Devel::hdb::PORT;
-
-    $self->{server} = Devel::hdb::Server->new(
-                        %server_params,
-                        server_ready => sub { $self->init_debugger },
-                    );
+    $self->_make_listen_socket();
     $self->{json} = JSON->new();
 
     $parent_pid = eval { getppid() } if ($Devel::hdb::TESTHARNESS);
     return $self;
+}
+
+sub _make_listen_socket {
+    my $self = shift;
+    my %server_params = @_;
+
+    $server_params{host} = $Devel::hdb::HOST || '127.0.0.1';
+    if (!exists($server_params{port}) and defined($Devel::hdb::PORT)) {
+        $server_params{port} = $Devel::hdb::PORT;
+    }
+
+    unless (exists $server_params{server_ready}) {
+        $server_params{server_ready} = sub { $self->init_debugger };
+    }
+
+    $self->{server} = Devel::hdb::Server->new( %server_params );
 }
 
 sub init_debugger {
@@ -45,19 +61,11 @@ sub init_debugger {
     }
 
     return if $self->{__init__};
-
     $self->{__init__} = 1;
 
-    # HTTP::Server::PSGI doesn't have a method to get the listen socket :(
-    my $s = $self->{server}->{listen_sock};
-    #$self->{base_url} = sprintf('http://%s:%d/%d/',
-    #        $s->sockhost, $s->sockport, $$);
-    $self->{base_url} = sprintf('http://%s:%d/',
-            $s->sockhost, $s->sockport);
+    eval { $self->load_settings_from_file() };
 
-    select STDOUT;
-    local $| = 1;
-    print "Debugger listening on ",$self->{base_url},"\n";
+    $self->_announce();
 
     $self->{router} = Devel::hdb::Router->new();
     for ($self->{router}) {
@@ -79,7 +87,68 @@ sub init_debugger {
         $_->get("/exit", sub { $self->do_terminate(@_) });
         $_->post("/eval", sub { $self->do_eval(@_) });
         $_->post("/getvar", sub { $self->do_getvar(@_) });
+        $_->post("/announce_child", sub { $self->announce_child(@_) });
+        $_->get("/ping", sub { $self->ping(@_) });
+        $_->post("/loadconfig", sub { $self->loadconfig(@_) });
+        $_->post("/saveconfig", sub { $self->saveconfig(@_) });
     }
+}
+
+sub ping {
+    my($self,$env) = @_;
+
+    my $resp = $self->_resp('ping', $env);
+    return [ 200,
+            [ 'Content-Type' => 'application/json' ],
+            [ $resp->encode() ]
+        ];
+}
+
+sub _announce {
+    my $self = shift;
+
+    # HTTP::Server::PSGI doesn't have a method to get the listen socket :(
+    my $s = $self->{server}->{listen_sock};
+    $self->{base_url} = sprintf('http://%s:%d/',
+            $s->sockhost, $s->sockport);
+
+    select STDOUT;
+    local $| = 1;
+    print "Debugger pid $$ listening on ",$self->{base_url},"\n";
+}
+
+
+# Called in the parent process after a fork
+sub notify_parent_child_was_forked {
+    my($self, $child_pid) = @_;
+
+}
+
+# called in the child process after a fork
+sub notify_child_process_is_forked {
+    my $self = shift;
+
+    $parent_pid = undef;
+    our($ORIGINAL_PID) = $$;
+    my $parent_base_url = $self->{base_url};
+
+    my $announced;
+    my $when_ready = sub {
+        unless ($announced) {
+            $announced = 1;
+            $self->_announce();
+            my $ua = LWP::UserAgent->new();
+            my $resp = $ua->post($parent_base_url
+                                . 'announce_child', { pid => $$, uri => $self->{base_url} });
+            unless ($resp->is_success()) {
+                print STDERR "sending announce failed... exiting\n";
+                exit(1) if ($Devel::hdb::TESTHARNESS);
+            }
+        }
+    };
+
+    # Force it to pick a new port
+    $self->_make_listen_socket(port => undef, server_ready => $when_ready);
 }
 
 sub encode {
@@ -96,7 +165,9 @@ sub do_terminate {
     return sub {
         my $responder = shift;
         my $writer = $responder->([ 200, [ 'Content-Type' => 'application/json' ]]);
-        $writer->write($json->encode({ type => 'hangup' }));
+
+        my $resp = Devel::hdb::App::Response->new('hangup');
+        $writer->write($resp->encode);
         $writer->close();
         exit();
     };
@@ -105,6 +176,22 @@ sub do_terminate {
 sub _resp {
     my $self = shift;
     return Devel::hdb::App::Response->new(@_);
+}
+
+sub announce_child {
+    my($self, $env) = @_;
+    my $req = Plack::Request->new($env);
+    my $child_pid = $req->param('pid');
+    my $child_uri = $req->param('uri');
+
+    my $resp = Devel::hdb::App::Response->queue('child_process', $env);
+    $resp->{data} = {
+            pid => $child_pid,
+            uri => $child_uri,
+            run => $child_uri . 'continue?nostop=1'
+        };
+
+    return [200, [], []];
 }
 
 # Evaluate some expression in the debugged program's context.
@@ -167,6 +254,10 @@ sub _encode_eval_data {
                 $tmpvalue{IO} = 'fileno '.fileno(*{$value}{IO});
             }
             $value = \%tmpvalue;
+        } elsif (($reftype eq 'REGEXP')
+                    or ($reftype eq 'SCALAR' and defined($blesstype) and $blesstype eq 'Regexp')
+        ) {
+            $value = $value . '';
         } elsif ($reftype eq 'SCALAR') {
             $value = $self->_encode_eval_data($$value);
         } elsif ($reftype eq 'CODE') {
@@ -174,8 +265,6 @@ sub _encode_eval_data {
             $value = $copy;
         } elsif ($reftype eq 'REF') {
             $value = $self->_encode_eval_data($$value);
-        } elsif ($reftype eq 'REGEXP') {
-            $value = $value . '';
         }
 
         $value = { __reftype => $reftype, __refaddr => $refaddr, __value => $value };
@@ -257,19 +346,34 @@ sub set_breakpoint {
     $req{action} = $action if (exists $params->{'a'});
     $req{action_inactive} = $action_inactive if (exists $params->{'ai'});
 
-    DB->set_breakpoint($filename, $line, %req);
-
-    my $resp_data = DB->get_breakpoint($filename, $line);
-    unless ($resp_data) {
-        # This breakpoint was deleted
-        $resp_data = { filename => $filename, lineno => $line };
-    }
+    my $resp_data = $self->_set_breakpoint_and_respond($filename, $line, %req);
     $resp->data( $resp_data );
 
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
             [ $resp->encode() ]
           ];
+}
+
+sub _set_breakpoint_and_respond {
+    my($self, $filename, $line, %params) = @_;
+
+    unless (DB->is_loaded($filename)) {
+        DB->postpone_until_loaded(
+                $filename,
+                sub { DB->set_breakpoint($filename, $line, %params) }
+        );
+        return;
+    }
+
+    DB->set_breakpoint($filename, $line, %params);
+
+    my $resp_data = DB->get_breakpoint($filename, $line);
+    unless ($resp_data) {
+        # This breakpoint was deleted
+        $resp_data = { filename => $filename, lineno => $line };
+    }
+    return $resp_data;
 }
 
 
@@ -470,9 +574,24 @@ sub stepout {
 
 sub continue {
     my $self = shift;
+    my $env = shift;
+
+    my $req = Plack::Request->new($env);
+    my $nostop = $req->param('nostop');
 
     $DB::single=0;
-    return $self->_delay_stack_return_to_client(@_);
+    if ($nostop) {
+        DB->disable_debugger();
+        my $resp = Devel::hdb::App::Response->new('continue', $env);
+        $resp->data({ nostop => 1 });
+        $env->{'psgix.harakiri.commit'} = Plack::Util::TRUE;
+        return [ 200,
+                    [ 'Content-Type' => 'application/json'],
+                    [ $resp->encode() ]
+                ];
+    }
+
+    return $self->_delay_stack_return_to_client($env);
 }
 
 sub _delay_stack_return_to_client {
@@ -488,16 +607,10 @@ sub _delay_stack_return_to_client {
         my $writer = $responder->([ 200, [ 'Content-Type' => 'application/json' ]]);
         $env->{'psgix.harakiri.commit'} = Plack::Util::TRUE;
 
-        my @messages;
         DB->long_call( sub {
-            if (@_) {
-                # They want to send additional messages
-                push @messages, shift;
-                return;
-            }
-            # Purposefully not using a response object since we can't encode a list of them
-            unshift @messages, { type => 'stack', rid => $rid, data => $self->_stack };
-            $writer->write($json->encode(\@messages));
+            my $resp = Devel::hdb::App::Response->new('stack', $env);
+            $resp->data( $self->_stack );
+            $writer->write( $resp->encode );
             $writer->close();
         });
     };
@@ -517,6 +630,117 @@ sub run {
 }
 
 
+sub notify_program_terminated {
+    my $class = shift;
+    my $exit_code = shift;
+
+    my $msg = Devel::hdb::App::Response->queue('termination');
+    $msg->{data}->{exit_code} = $exit_code;
+}
+
+sub notify_program_exit {
+    my $msg = Devel::hdb::App::Response->queue('hangup');
+}
+
+sub settings_file {
+    my $class = shift;
+    my $prefix = shift;
+    our $PROGRAM_NAME;
+    return ((defined($prefix) && $prefix) || $PROGRAM_NAME) . '.hdb';
+}
+
+sub loadconfig {
+    my($self, $env) = @_;
+
+    my $req = Plack::Request->new($env);
+    my $file = $req->param('f');
+
+    my @results = eval { $self->load_settings_from_file($file) };
+    my $load_resp = Devel::hdb::App::Response->new('loadconfig', $env);
+    if (! $@) {
+        foreach (@results) {
+            my $resp = Devel::hdb::App::Response->queue('breakpoint');
+            $resp->data($_);
+        }
+
+        $load_resp->data({ success => 1, filename => $file });
+
+    } else {
+        $load_resp->data({ failed => $@ });
+    }
+    return [ 200,
+            [ 'Content-Type' => 'application/json'],
+            [ $load_resp->encode() ]
+        ];
+}
+
+sub saveconfig {
+    my($self, $env) = @_;
+
+    my $req = Plack::Request->new($env);
+    my $file = $req->param('f');
+
+    $file = eval { $self->save_settings_to_file($file) };
+    my $resp = Devel::hdb::App::Response->new('saveconfig', $env);
+    if ($@) {
+        $resp->data({ failed => $@ });
+    } else {
+        $resp->data({ success => 1, filename => $file });
+    }
+    return [ 200,
+            [ 'Content-Type' => 'application/json'],
+            [ $resp->encode() ]
+        ];
+}
+
+
+sub load_settings_from_file {
+    my $self = shift;
+    my $file = shift;
+
+    unless (defined $file) {
+        $file = $self->settings_file();
+    }
+
+    my $buffer;
+    {
+        local($/);
+        my $fh = IO::File->new($file, 'r') || die "Can't open file $file for reading: $!";
+        $buffer = <$fh>;
+    }
+    my $settings = eval $buffer;
+    die $@ if $@;
+
+
+    my @set_breakpoints;
+    foreach my $bp ( @{ $settings->{breakpoints}} ) {
+        my %req;
+        foreach my $key ( qw( condition condition_inactive action action_inactive ) ) {
+            $req{$key} = $bp->{$key} if (exists $bp->{$key});
+        }
+        push @set_breakpoints,
+             $self->_set_breakpoint_and_respond($bp->{filename}, $bp->{lineno}, %req);
+        #$resp->data( $resp_data );
+    }
+    return @set_breakpoints;
+}
+
+sub save_settings_to_file {
+    my $self = shift;
+    my $file = shift;
+
+    unless (defined $file) {
+        $file = $self->settings_file();
+    }
+
+    my @breakpoints = DB->get_breakpoint();
+    my $fh = IO::File->new($file, 'w') || die "Can't open $file for writing: $!";
+    $fh->print( Data::Dumper->new([{ breakpoints => \@breakpoints}])->Terse(1)->Dump());
+    return $file;
+}
+
+
+
 package Devel::hdb::App::Response;
 
 sub new {
@@ -534,11 +758,39 @@ sub new {
     bless $self, $class;
 }
 
-sub encode {
+our @queued;
+sub queue {
+    my $class = shift;
+
+    my $self = $class->new(@_);
+    push @queued, $self;
+    return $self;
+}
+
+sub _make_copy {
     my $self = shift;
 
     my %copy = map { exists($self->{$_}) ? ($_ => $self->{$_}) : () } keys %$self;
-    return JSON::encode_json(\%copy);
+    return \%copy;
+}
+
+sub encode {
+    my $self = shift;
+
+    my $copy = $self->_make_copy();
+
+    my $retval;
+    if (@queued) {
+        foreach ( @queued ) {
+            $_ = $_->_make_copy();
+        }
+        unshift @queued, $copy;
+        $retval = JSON::encode_json(\@queued);
+        @queued = ();
+    } else {
+        $retval = JSON::encode_json($copy);
+    }
+    return $retval;
 }
 
 sub data {

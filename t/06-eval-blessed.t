@@ -6,8 +6,14 @@ use HdbHelper;
 use WWW::Mechanize;
 use JSON;
 use Devel::hdb::App;
+use Scalar::Util;
 
-use Test::More tests => 32;
+use Test::More;
+if ($^O =~ m/^MS/) {
+    plan skip_all => 'Test hangs on Windows';
+} else {
+    plan tests => 32;
+}
 
 my $encoded = Devel::hdb::App->_encode_eval_data(bless { a => [1,2,3]}, 'Foo');
 ok($encoded, 'Encode a blessed hashref directly');
@@ -87,7 +93,7 @@ $answer = $json->decode($resp->content);
 ok(delete $answer->{data}->{result}->{__refaddr}, 'encoded has a refaddr');
 my $handle_info = delete $answer->{data}->{result}->{__value}->{IO};
 like($handle_info, qr(fileno \d+), 'Filehandle looks ok');
-ok(delete $answer->{data}->{result}->{__value}->{SCALAR}->{__refaddr}, 'enbedded SCALAR has a refaddr');
+ok(delete $answer->{data}->{result}->{__value}->{SCALAR}->{__refaddr}, 'embedded SCALAR has a refaddr');
 is_deeply($answer->{data},
     { expr => '$file',
       result => { __blessed => 'IO::File',
@@ -106,10 +112,11 @@ ok($resp->is_success, 'Get value of a Regex instance');
 $answer = $json->decode($resp->content);
 ok(delete $answer->{data}->{result}->{__refaddr}, 'encoded has a refaddr');
 my $expected_re = qr(abc) . '';
+my $expected_reftype = Scalar::Util::reftype(qr(abc));
 is_deeply($answer->{data},
     { expr => '$re',
       result => { __blessed => 'Regexp',
-                  __reftype => 'REGEXP',
+                  __reftype => $expected_reftype,
                   __value => $expected_re,
                 }
     },
@@ -121,8 +128,8 @@ ok($resp->is_success, 'Get value of a complex structure');
 $answer = $json->decode($resp->content);
 ok(delete $answer->{data}->{result}->{__refaddr}, 'top-level has a refaddr');
 ok(delete $answer->{data}->{result}->{__value}->[0]->{__refaddr}, 'first list elt has a refaddr');
-ok(delete $answer->{data}->{result}->{__value}->[1]->{__refaddr}, 'first list elt has a refaddr');
-ok(delete $answer->{data}->{result}->{__value}->[2]->{__refaddr}, 'first list elt has a refaddr');
+ok(delete $answer->{data}->{result}->{__value}->[1]->{__refaddr}, 'next list elt has a refaddr');
+ok(delete $answer->{data}->{result}->{__value}->[2]->{__refaddr}, 'last list elt has a refaddr');
 is_deeply($answer->{data},
     { expr => '$complex',
       result => { __reftype => 'ARRAY',

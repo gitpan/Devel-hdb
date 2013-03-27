@@ -21,6 +21,7 @@ our($stack_depth,
     $single,
     $signal,
     $trace,
+    $debugger_disabled,
     $step_over_depth,
     $dbobj,
     $ready,
@@ -38,6 +39,8 @@ our($stack_depth,
 BEGIN {
     $stack_depth    = 0;
     $single         = 0;
+    $trace          = 0;
+    $debugger_disabled = 0;
     $step_over_depth = undef;
     $dbobj          = undef;
     $ready          = 0;
@@ -110,17 +113,31 @@ sub is_breakpoint {
     return;
 }
 
-# This gets called after a require'd file is compiled, but before it's executed
-# it's called as DB::postponed(*{"_<$filename"})
-# We can use this to break on module load, for example.
-# If $DB::postponed{$subname} exists, then this is called as
-# DB::postponed($subname)
-sub postponed {
+BEGIN {
+    # Code to get control when the debugged process forks
+    *CORE::GLOBAL::fork = sub {
+        my $pid = CORE::fork();
+        return $pid unless $ready;
+        my $app = Devel::hdb::App->get();
+        my $tracker;
+        if ($pid) {
+            $app->notify_parent_child_was_forked($pid);
+        } elsif (defined $pid) {
+            $long_call = undef;   # Cancel any pending long call in the child
+            $app->notify_child_process_is_forked();
 
-}
+            # These should make it stop after returning from the fork
+            # It's cut-and-paste from Devel::hdb::App::stepout()
+            $DB::single=0;
+            $DB::step_over_depth = $DB::stack_depth - 1;
+            $tracker = _new_stack_tracker($pid);
+        }
+        return $pid;
+    };
+};
 
 sub DB {
-    return unless $ready;
+    return if (!$ready or $debugger_disabled);
 
     my($package, $filename, $line) = caller;
 
@@ -154,9 +171,8 @@ sub DB {
         $package = 'main';
     }
 
-    unless ($dbobj) {
-        $dbobj = Devel::hdb::App->new();
-    }
+    $dbobj = Devel::hdb::App->get();
+
     do {
         local($in_debugger) = 1;
         if ($DB::long_call) {
@@ -173,7 +189,7 @@ sub DB {
 
 sub sub {
     no strict 'refs';
-    goto &$sub if (! $ready or index($sub, 'hdbStackTracker') == 0);
+    goto &$sub if (! $ready or index($sub, 'hdbStackTracker') == 0 or $debugger_disabled);
 
     local @AUTOLOAD_names = @AUTOLOAD_names;
     if (index($sub, '::AUTOLOAD', -10) >= 0) {
@@ -185,11 +201,15 @@ sub sub {
     unless ($in_debugger) {
         my $tmp = $sub;
         $stack_depth++;
-        $stack_tracker = \$tmp;
-        bless $stack_tracker, 'hdbStackTracker';
+        $stack_tracker = _new_stack_tracker($tmp);
     }
 
     return &$sub;
+}
+
+sub _new_stack_tracker {
+    my $token = shift;
+    my $self = bless \$token, 'hdbStackTracker';
 }
 
 sub hdbStackTracker::DESTROY {
@@ -249,13 +269,36 @@ sub get_var_at_level {
     return ${ $h->{$varname} };
 }
 
+
+# This gets called after a require'd file is compiled, but before it's executed
+# it's called as DB::postponed(*{"_<$filename"})
+# We can use this to break on module load, for example.
+# If $DB::postponed{$subname} exists, then this is called as
+# DB::postponed($subname)
+sub postponed {
+    my($filename) = ($_[0] =~ m/_\<(.*)$/);
+
+    our %postpone_until_loaded;
+    if (my $actions = delete $postpone_until_loaded{$filename}) {
+        $_->() foreach @$actions;
+    }
+}
+
+sub postpone_until_loaded {
+    my($class, $filename, $sub) = @_;
+
+    our %postpone_until_loaded;
+    $postpone_until_loaded{$filename} ||= [];
+
+    push @{ $postpone_until_loaded{$filename} }, $sub;
+}
+
 sub set_breakpoint {
     my $class = shift;
     my $filename = shift;
     my $line = shift;
     my %params = @_;
 
-    #no strict 'refs';
     local(*dbline) = $main::{'_<' . $filename};
 
     if (exists $params{condition}) {
@@ -345,8 +388,11 @@ sub loaded_files {
 }
 
 sub long_call {
-    my($class, $cb) = @_;
-    $DB::long_call = $cb;
+    my $class = shift;
+    if (@_) {
+        $DB::long_call = shift;
+    }
+    return $DB::long_call;
 }
 
 # FIXME: I think the keys for %DB::sub is fully qualified
@@ -425,22 +471,30 @@ sub eval {
     }
 }
 
+sub disable_debugger {
+    # Setting $^P disables single stepping and subrouting entry
+    # bug if the program sets $DB::single explicitly, it'll still enter DB()
+    $^P = 0;  # Stops single-stepping
+    $debugger_disabled = 1;
+}
+
 
 END {
+    print "Debugged program pid $$ terminated with exit code $?\n";
+    return if $debugger_disabled;
+
     $single=0;
     $finished = 1;
-    print "Debugged program terminated with exit code $?\n";
+    $in_debugger = 1;
 
-    if ($long_call) {
-        if ($user_requested_exit) {
-            $long_call->({ type => 'hangup'});
-        } else {
-            $long_call->({ type => 'termination', data => { exit_code => $? }});
-            #$exit_code = $?;
-            # These two will trigger DB::DB and the event loop
-            $single=1;
-            DB::fake::at_exit();
-        }
+    if ($user_requested_exit) {
+        Devel::hdb::App->get()->notify_program_exit();
+    } else {
+        Devel::hdb::App->get()->notify_program_terminated($?);
+        # These two will trigger DB::DB and the event loop
+        $in_debugger = 0;
+        $single=1;
+        DB::fake::at_exit();
     }
 }
 
