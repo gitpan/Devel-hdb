@@ -1,4 +1,4 @@
-CHANGES
+Changes
 LICENSE
 MANIFEST
 META.yml
@@ -9,6 +9,8 @@ dist.ini
 lib/Devel/hdb.pm
 lib/Devel/hdb/App.pm
 lib/Devel/hdb/DB.pm
+lib/Devel/hdb/DB/Eval.pm
+lib/Devel/hdb/DB/GetVarAtLevel.pm
 lib/Devel/hdb/Router.pm
 lib/Devel/hdb/Server.pm
 lib/Devel/hdb/html/bootstrap.css
@@ -46,6 +48,7 @@ t/08-action.t
 t/08-inactive-action.t
 t/09-AUTOLOAD.t
 t/10-function-args.t
+t/11-getvar-direct.t
 t/11-getvar.t
 t/12-request_id.t
 t/13-ping.t
@@ -54,5 +57,6 @@ t/15-continue-nostop.t
 t/16-load-breakpoints.t
 t/16-save-breakpoints.t
 t/16-startup-load-breakpoints.t
+t/50-router.t
 t/HdbHelper.pm
 t/TestNothing.pm
