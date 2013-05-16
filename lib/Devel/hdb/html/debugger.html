@@ -4,7 +4,9 @@
     <title>hdb</title>
     <!-- Bootstrap -->
     <link href="db/bootstrap.css" rel="stylesheet" media="screen">
+    <link href="db/css-treeview.css" rel="stylesheet" media="screen">
     <link href="db/debugger.css" rel="stylesheet" media="screen">
+    <link rel="icon" href="/db/favicon.ico" type="image/x-icon" />
     <script src="db/jquery.js"></script>
     <script src="db/bootstrap.js"></script>
     <script src="db/handlebars.js"></script>
@@ -12,12 +14,42 @@
     <script src="db/filemanager.js"></script>
     <script src="db/stackmanager.js"></script>
     <script src="db/jquery.scrollTo.js"></script>
+    <script src="db/filepicker.js"></script>
     <script src="db/debugger.js"></script>
     <script>
         $(document).ready(function() {
             var d = new Debugger('div.debugger-window');
             d.run();
         });
+    </script>
+
+    <! template for the sub picker >
+    <script id="sub-picker-template" type="text/x-handlebars-template">
+        <div class="modal">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                <h4>Subroutines</h4>
+            </div>
+            <div class="modal-body css-treeview">
+                <ul></ul>
+            </div>
+        </div>
+    </script>
+
+    <! template for the tree view inside the sub picker>
+    <script id="sub-picker-tree" type="text/x-handlebars-template">
+        {{#each subs}}
+            <li>
+                <a class="subroutine" data-package="{{#if ../package_name}}{{../package_name}}{{else}}main{{/if}}" data-sub="{{this}}">{{this}}</a>
+            </li>
+        {{/each}}
+        {{#each packages}}
+            <li>
+                <input unfilled="true" type="checkbox" id="{{#if ../package_name}}{{../../package_name}}::{{/if}}{{this}}" />
+                <label for="{{#if ../package_name}}{{../../package_name}}::{{/if}}{{this}}">{{this}}</label>
+                <ul></ul>
+            </li>
+        {{/each}}
     </script>
 
     <! template for forked child modal>
@@ -33,6 +65,55 @@
             <div class="modal-footer">
                 <a href="{{run}}" class="btn run-child">Detach</a>
                 <a href="{{uri}}" class="btn btn-primary debug-child" target="_blank">Open</a>
+            </div>
+        </div>
+    </script>
+
+    <! Template for the execution trace difference notifiaction>
+    <script id="trace-diff-modal-template" type="text/x-handlebars-template">
+        <div class="modal">
+            <div class="modal-header">
+                Stopped
+            <div>
+            <div class="modal-body">
+                Execution has deviated from the trace file.  The next expected line was
+                {{#if expected_offset}}
+                    {{expected_subroutine}} line {{expected_offset}}
+                    in {{expected_filename}}:{{expected_line}}
+                {{else}}
+                    <dl>
+                        <dt>package</dt>
+                            <dd>{{expected_package}}</dd>
+                        <dt>file</dt>
+                            <dd>{{expected_filename}}</dd>
+                        <dt>subroutine</dt>
+                            <dd>{{expected_subroutine}}</dd>
+                        <dt>line</dt>
+                            <dd>{{expected_line}}</dd>
+                    </dl>
+                {{/if}}
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" data-dismiss="modal">Ok</button>
+            </div>
+        </div>
+    </script>
+
+    <! template for 'program terminated' modal>
+    <script id="program-terminated-modal-template" type="text/x-handlebars-template">
+        <div class="modal">
+            <div class="modal-header">Program Terminated</div>
+            <div class="modal-body">
+                Debugged program terminated with exit code {{exit_code}}
+                {{#if exception}}
+                    <br>
+                    Exception in {{subroutine}} at {{filename}}:{{line}}
+                    <div class="alert alert-error">{{exception}}</div>
+                {{/if}}
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" data-dismiss="modal">Ok</button>
+                <button class="btn btn-danger control-button" data-action="exit" data-dismiss="modal">Exit</button>
             </div>
         </div>
     </script>
@@ -61,7 +142,19 @@
         </div>
     </script>
 
-    <! template for Bootstrap nav tabs>
+    <! template for the file tabs along the top>
+    <script id="file-tab-template" type="text/x-handlebars-template">
+        <li data-contentid="{{id}}" class="trunc-left {{#active}}active{{/active}}">
+            <a href="#{{id}}" data-toggle="tab">
+            {{#if closable}}<span class="remove-loaded-file close-button">
+                    <i class="icon-remove-sign icon-white"></i>
+                </span>
+            {{/if}}
+            {{label}}</a>
+        </li>
+    </script>
+
+    <! template for Bootstrap stack nav tabs>
     <script id="nav-tab-template" type="text/x-handlebars-template">
         <li{{#id}} id="{{id}}"{{/id}} class="stack-tab {{class}}{{#active}} active{{/active}}">
         </li>
@@ -75,7 +168,7 @@
     <! template for Bootstrap nav panes>
     <script id="nav-pane-template" type="text/x-handlebars-template">
         <div id="{{tabId}}" class="tab-pane{{#active}} active{{/active}}">
-            <div class="current-sub-and-args alert">&nbsp;</div>
+            <div class="current-sub-and-args alert">{{#if banner}}{{banner}}{{else}}&nbsp;{{/if}}</div>
             <div class="managed-height program-code-container" data-filename="{{filename}}">
                 {{{html}}}
             </div>
@@ -170,12 +263,12 @@
         <div class="container-column">
             <div class="row">
                 <div id="controls" class="span6 offset1">
-                    <a class="btn control-button" id="stepin" href="stepin">Step In</a>
-                    <a class="btn control-button" id="stepover" href="stepover">Step Over</a>
-                    <a class="btn control-button" id="stepout" href="stepout">Step Out</a>
-                    <a class="btn btn-primary control-button" id="continue" href="continue">Run</a>
+                    <button class="btn control-button" data-action="stepin">Step In</button>
+                    <button class="btn control-button" data-action="stepover">Step Over</button>
+                    <button class="btn control-button" data-action="stepout">Step Out</button>
+                    <button class="btn btn-primary control-button" data-action="continue">Run</button>
 
-                    <a class="btn btn-danger control-button pull-right" id="exit" href="exit">Exit</a>
+                    <button class="btn btn-danger control-button pull-right" data-action="exit">Exit</button>
                 </div>
             </div>
 
@@ -213,7 +306,7 @@
             <div id="watch-expressions" class="container-column managed-height">
                 <div id="watch-expressions-title">
                     <strong>Watch Expressions</strong>
-                    <span id="add-watch-expr"><i class="icon-plus"></i></span>
+                    <button class="btn btn-mini" id="add-watch-expr" type="button"><i class="icon-plus"></i></button>
                 </div>
                 <div id="watch-expressions-container" class="managed-height"></div>
             </div>

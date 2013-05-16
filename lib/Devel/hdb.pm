@@ -6,12 +6,14 @@ package Devel::hdb;
 use Devel::hdb::App;
 use Devel::hdb::DB;
 use IO::Socket::INET;
+use IO::File;
 
-our $VERSION = 0.06;
+our $VERSION = 0.07;
 
 sub import {
     my $class = shift;
 
+    our $TESTHARNESS;
     while (@_) {
         my $param = shift;
         if ($param =~ m/port:(\d+)/) {
@@ -21,7 +23,15 @@ sub import {
         } elsif ($param eq 'a') {
             our $HOST = inet_ntoa(INADDR_ANY);
         } elsif ($param eq 'testharness') {
-            our $TESTHARNESS = 1;
+            $TESTHARNESS = 1;
+        } elsif ($param =~ m/trace:(.*)/) {
+            print STDERR "Writing execution trace to $1...\n" unless $TESTHARNESS;
+            DB->disable_stopping(1);
+            unless($DB::trace = IO::File->new($1, 'w')) {
+                die "Can't open trace file for writing: $!";
+            }
+        } elsif ($param =~ m/follow:(.*)/) {
+            DB->input_trace_file($1, sub { Devel::hdb::App->get()->notify_trace_diff(@_) });
         }
     }
 }
@@ -55,11 +65,11 @@ start it like this:
 
 To specify a particular IP address to listen on:
 
-    perl -d:hdb=host:192.168.0.123 yourprogram.pm
+    perl -d:hdb=host:192.168.0.123 yourprogram.pl
 
 And to listen on any interface:
 
-    perl -d:hdb=a yourprogram.pm
+    perl -d:hdb=a yourprogram.pl
 
 =head2 Interface
 
@@ -105,7 +115,7 @@ running.
 Most of the interface is taken up by the code browser.  Tabs along the top
 show one file at a time.  The "+" next to the last tab brings up a dialog
 to choose another file to open.  Click the "x" next to a file name to close
-that tab.  NOTE: loading additional files is not implemented yet.
+that tab.
 
 The first tab is special: it shows the stack frames of the currently
 executing program and cannot be closed.  The stack tab itself has tabs along
@@ -152,6 +162,27 @@ Open a new browser window and debug the child process inside it
 Disables the debugger in the child process, and forces it to run to completion.
 
 =back
+
+=head2 Trace and Follow mode
+
+Devel::hdb can trace the execution of a program and stop if the code path
+differs from that of a previously save run.  First, run the program in trace
+mode:
+
+  perl -d:hdb=trace:<tracefile> yourprogram.pl
+
+In trace mode, the program runs normally, and the debugger does not stop
+execution.  It records information about which lines of code were run into
+the specified file (tracefile, in this example).  Next, run the program
+again in follow mode:
+
+  perl -d:hdb=follow:<tracefile> yourprogram.pl
+
+This time, the debugger starts up normally, stopping on the first line of the
+program.  As the program runs, the debugger reads the trace information from
+the specified file.  The first time the current location is different than
+what is in the file, the debugger will stop and report which line it expected.
+After it stops in this way, follow mode is disabled.
 
 =head2 Included Code
 

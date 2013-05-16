@@ -18,6 +18,7 @@ use LWP::UserAgent;
 use Data::Dumper;
 
 use Devel::hdb::Router;
+use Devel::hdb::DB::PackageInfo;
 
 use vars qw( $parent_pid ); # when running in the test harness
 
@@ -91,6 +92,8 @@ sub init_debugger {
         $_->get("/ping", sub { $self->ping(@_) });
         $_->post("/loadconfig", sub { $self->loadconfig(@_) });
         $_->post("/saveconfig", sub { $self->saveconfig(@_) });
+        $_->get(qr(/pkginfo/((\w+)(::\w+)*)), sub { $self->pkginfo(@_) });
+        $_->get(qr(/subinfo/((\w+)(::\w+)*)), sub { $self->subinfo(@_) });
     }
 }
 
@@ -114,7 +117,7 @@ sub _announce {
 
     select STDOUT;
     local $| = 1;
-    print "Debugger pid $$ listening on ",$self->{base_url},"\n";
+    print "Debugger pid $$ listening on ",$self->{base_url},"\n" unless ($Devel::hdb::TESTHARNESS);
 }
 
 
@@ -288,10 +291,29 @@ sub _encode_eval_data {
 
         $value = { __reftype => $reftype, __refaddr => $refaddr, __value => $value };
         $value->{__blessed} = $blesstype if $blesstype;
+
+    } elsif (ref(\$value) eq 'GLOB') {
+        # It's an actual typeglob (not a glob ref)
+        my $globref = \$value;
+        my %tmpvalue = map { $_ => $self->_encode_eval_data(*{$globref}{$_}) }
+                       grep { *{$globref}{$_} }
+                       qw(HASH ARRAY SCALAR);
+        if (*{$globref}{CODE}) {
+            $tmpvalue{CODE} = *{$globref}{CODE};
+        }
+        if (*{$globref}{IO}) {
+            $tmpvalue{IO} = 'fileno '.fileno(*{$globref}{IO});
+        }
+        $value = {  __reftype => 'GLOB',
+                    __refaddr => Scalar::Util::refaddr($globref),
+                    __value => \%tmpvalue,
+                };
     }
+    
 
     return $value;
 }
+
 
 sub loaded_files {
     my($self, $env) = @_;
@@ -305,6 +327,36 @@ sub loaded_files {
             [ $resp->encode() ]
         ];
 }
+
+# Get data about the packages and subs within the mentioned package
+sub pkginfo {
+    my($self, $env, $package) = @_;
+
+    my $resp = $self->_resp('pkginfo', $env);
+    my $sub_packages = Devel::hdb::DB::PackageInfo::namespaces_in_package($package);
+    my @subs = grep { Devel::hdb::DB::PackageInfo::sub_is_debuggable($package, $_) }
+                    @{ Devel::hdb::DB::PackageInfo::subs_in_package($package) };
+
+    $resp->data({ packages => $sub_packages, subs => \@subs });
+    return [ 200,
+            [ 'Content-Type' => 'application/json' ],
+            [ $resp->encode() ]
+        ];
+}
+
+# Get information about a subroutine
+sub subinfo {
+    my($self, $env, $subname) = @_;
+
+    my $resp = $self->_resp('subinfo', $env);
+    $resp->data( Devel::hdb::DB::PackageInfo::sub_info($subname));
+    return [ 200,
+            [ 'Content-Type' => 'application/json' ],
+            [ $resp->encode() ]
+        ];
+}
+
+
 
 my %perl_special_vars = map { $_ => 1 }
     qw( $0 $1 $2 $3 $4 $5 $6 $7 $8 $9 $& ${^MATCH} $` ${^PREMATCH} $'
@@ -489,6 +541,7 @@ sub sourcefile {
         my $offset = 1;
 
         for (my $i = $offset; $i < scalar(@$file); $i++) {
+            no warnings 'numeric';  # eval-ed "sources" generate "not-numeric" warnings
             push @rv, [ $file->[$i], $file->[$i] + 0 ];
         }
     }
@@ -673,12 +726,23 @@ sub run {
     return $self->{server}->run($self->app);
 }
 
+sub notify_trace_diff {
+    my($self, $trace_data) = @_;
+
+    my $msg = Devel::hdb::App::Response->queue('trace_diff');
+    $msg->{data} = $trace_data;
+}
 
 sub notify_program_terminated {
     my $class = shift;
     my $exit_code = shift;
+    my $exception_data = shift;
 
+    print STDERR "Debugged program pid $$ terminated with exit code $exit_code\n" unless ($Devel::hdb::TESTHARNESS);
     my $msg = Devel::hdb::App::Response->queue('termination');
+    if ($exception_data) {
+        $msg->{data} = $exception_data;
+    }
     $msg->{data}->{exit_code} = $exit_code;
 }
 
@@ -823,16 +887,16 @@ sub encode {
 
     my $copy = $self->_make_copy();
 
-    my $retval;
+    my $retval = '';
     if (@queued) {
         foreach ( @queued ) {
             $_ = $_->_make_copy();
         }
         unshift @queued, $copy;
-        $retval = JSON::encode_json(\@queued);
+        $retval = eval { JSON::encode_json(\@queued) };
         @queued = ();
     } else {
-        $retval = JSON::encode_json($copy);
+        $retval = eval { JSON::encode_json($copy) };
     }
     return $retval;
 }
