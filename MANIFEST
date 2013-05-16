@@ -9,7 +9,6 @@ debian/changelog
 debian/compat
 debian/control
 debian/copyright
-debian/files
 debian/rules
 dist.ini
 lib/Devel/hdb.pm
