@@ -4,8 +4,21 @@
 }
 
 .PerlValue {
-    zoom: 80%;
+    font-size: x-small;
 }
+.PerlValue dt {
+    font-family: Verdana;
+    font-weight: bold;
+    float: left;
+}
+.PerlValue dl {
+    margin-top: 2px;
+    margin-bottom: 0px;
+}
+.PerlValue dd > span {
+    margin-left: 1em;
+}
+
 .program-code .active .code  {
     background-color: rgba(0,101,204,0.7) !important;
 }
@@ -114,6 +127,8 @@ div#controls {
 
 .current-sub-and-args {
     margin-bottom: 0;
+    overflow: hidden;
+    white-space: nowrap;
 }
 .current-sub-and-args ul.sub-arg-list {
     display: inline;

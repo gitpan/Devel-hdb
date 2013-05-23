@@ -8,7 +8,7 @@ use Devel::hdb::DB;
 use IO::Socket::INET;
 use IO::File;
 
-our $VERSION = 0.08;
+our $VERSION = 0.08_01;
 
 sub import {
     my $class = shift;
@@ -32,7 +32,11 @@ sub import {
             }
         } elsif ($param =~ m/follow:(.*)/) {
             DB->input_trace_file($1, sub { Devel::hdb::App->get()->notify_trace_diff(@_) });
+        } elsif ($param =~ m/listenfd:(\d+)/) {
+            our $LISTEN_SOCK = IO::Socket::INET->new();
+            $LISTEN_SOCK->fdopen($1, 'r');
         }
+
     }
 }
 1;
@@ -57,7 +61,7 @@ To debug a Perl program, start it like this:
     perl -d:hdb youprogram.pl
 
 It will print a message on STDERR with the URL the debugger is listening to.
-Point you web browser at this URL and it will being up the debugger GUI.
+Point your web browser at this URL and it will being up the debugger GUI.
 It defaults to listening on localhost port 8080; to use a different port,
 start it like this:
 
@@ -77,9 +81,7 @@ The GUI is divided into three main parts: Control buttons, Code browser and
 Watch expressions.  Additionally, click on the thick border between the code
 and watch panes to slide out the breakpoint list.
 
-=over 4
-
-=item Control buttons
+=head3 Control buttons
 
 =over 4
 
@@ -110,7 +112,7 @@ running.
 
 =back
 
-=item Code Browser
+=head3 Code Browser
 
 Most of the interface is taken up by the code browser.  Tabs along the top
 show one file at a time.  The "+" next to the last tab brings up a dialog
@@ -137,13 +139,64 @@ Hover the mouse over a variable to see its value.  It shows the value in
 whichever stack frame is being displayed.  To see the values for variables
 in higher frames, select the appropriate frame from the tab on the left.
 
-=item Watch Expressions
+=head3 Watch Expressions
 
 The right side of the GUI shows watch expressions.  To add a new expression to
 the watch window, click on the "+".  To remove a watched expression, click on
 the "x" next to its name.  Composite types like Hashes and arrays have a blue
 circled number indicating how many elements belong to it.  To collapse/expand
 them, click the blue cicle.
+
+=head3 Key bindings
+
+The debugger responds to these keys, which are generally the same as the
+command-line debugger commands
+
+=over 4
+
+=item s
+
+Step in
+
+=item n
+
+Step over
+
+=item <CR>
+
+Repeat the last 's' or 'n'
+
+=item r
+
+Step out
+
+=item c
+
+Continue/Run
+
+=item q
+
+Quit/Exit
+
+=item x
+
+Add new watch expression
+
+=item f
+
+Add new file
+
+=item .
+
+Scroll the code window to show the current line
+
+=item L
+
+Open the breakpoint manager
+
+=item b
+
+Toggle a breakpoint on the current line
 
 =back
 
@@ -166,7 +219,7 @@ Disables the debugger in the child process, and forces it to run to completion.
 =head2 Trace and Follow mode
 
 Devel::hdb can trace the execution of a program and stop if the code path
-differs from that of a previously save run.  First, run the program in trace
+differs from that of a previously saved run.  First, run the program in trace
 mode:
 
   perl -d:hdb=trace:<tracefile> yourprogram.pl

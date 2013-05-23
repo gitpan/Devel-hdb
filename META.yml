@@ -3,7 +3,7 @@ abstract: 'A Perl debugger implemented as a REST service and accompanying browse
 author:
   - 'Anthony Brummett <brummett@cpan.org>'
 build_requires:
-  Exporter: 0
+  Fcntl: 0
   File::Basename: 0
   File::Temp: 0
   IO::Socket: 0
@@ -21,6 +21,7 @@ meta-spec:
 name: Devel-hdb
 requires:
   Data::Dumper: 0
+  Exporter: 0
   HTTP::Server::PSGI: 0
   IO::File: 0
   IO::Socket::INET: 0
@@ -30,7 +31,9 @@ requires:
   Plack::Request: 0
   Scalar::Util: 0
   Socket: 0
+  Sys::Hostname: 0
+  base: 0
   strict: 0
   vars: 0
   warnings: 0
-version: 0.08
+version: 0.08_01

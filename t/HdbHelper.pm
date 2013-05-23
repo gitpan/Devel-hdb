@@ -9,10 +9,11 @@ use File::Basename;
 use IO::Socket;
 use File::Temp;
 use IO::File;
+use Fcntl;
 use Time::HiRes qw(sleep);
 
 use Exporter 'import';
-our @EXPORT = qw( start_test_program strip_stack strip_stack_inc_args );
+our @EXPORT = qw( start_test_program strip_stack strip_stack_inc_args strip_refaddr );
 
 
 my $out_fh;
@@ -31,7 +32,7 @@ sub start_test_program {
     if ($program_file) {
         $out_fh = IO::File->new($program_file,'w');
     } else {
-        $out_fh = File::Temp->new(TEMPLATE => 'devel-hdb-test-XXXX');
+        $out_fh = File::Temp->new(TEMPLATE => 'devel-hdb-test-XXXX', TMPDIR => 1);
         $program_file = $out_fh->filename();
     }
 
@@ -51,10 +52,15 @@ sub start_test_program {
 
     my $libdir = File::Basename::dirname(__FILE__). '/../lib';
 
-    my $port = $ENV{DEVEL_HDB_PORT} = pick_unused_port();
-    Test::More::note("Using port $ENV{DEVEL_HDB_PORT}\n");
+    # Create a listen socket for the child process to use
+    my $listen_sock = IO::Socket::INET->new(LocalAddr => '127.0.0.1',
+                                            Proto => 'tcp',
+                                            Listen => 5);
+    my $sock_flags = fcntl($listen_sock, F_GETFD, 0) or die "fcntl F_GETFD: $!";
+    fcntl($listen_sock, F_SETFD, $sock_flags & ~FD_CLOEXEC) or die "fcntl F_SETFD: $!";
+    my $port = $listen_sock->sockport();
 
-    my $module_invocation = "-d:hdb=port:$port,testharness";
+    my $module_invocation = "-d:hdb=testharness,listenfd:".$listen_sock->fileno;
     if ($module_args) {
         $module_invocation .= ",$module_args";
     }
@@ -62,14 +68,12 @@ sub start_test_program {
                                $program_file,
                                @argv);
 
-    Test::More::note("running $cmdline");
     my $pid = fork();
     if ($pid) {
         Test::More::note("pid $pid");
-        wait_on_port($port);
     } elsif(defined $pid) {
-        exec($cmdline);
-        die "Running child process failed: $!";
+        Test::More::note("running $cmdline");
+        exec($cmdline) || die "Running child process failed: $!";
     } else {
         die "fork failed: $!";
     }
@@ -83,39 +87,6 @@ sub start_test_program {
         return "http://localhost:${port}/";
     }
 }
-
-# Pick a port not in use by the system
-# It's kind of a hack, in that some other process _could_
-# pick the same port between the time we close this one and the
-# debugged program starts up.
-# It also relies on the fact that HTTP::Server::PSGI specifies
-# Reuse => 1 when it opens the port
-sub pick_unused_port {
-    my $s = IO::Socket::INET->new(Listen => 1, LocalAddr => 'localhost', Proto => 'tcp');
-    my $port = $s->sockport();
-    return $port;
-}
-
-# Waits until we can connect to the port
-sub wait_on_port {
-    my $port = shift;
-    my $tries = shift;
-    $tries = 100 unless defined $tries;
-
-    my $s;
-    while($tries--) {
-        sleep 0.01;
-        $s = IO::Socket::INET->new(PeerAddr => 'localhost',
-                                        PeerPort => $port,
-                                        Proto => 'tcp');
-        last if $s;
-        next if ($! eq 'Connection refused');
-        die $!;
-    }
-    $s->close if $s;
-    return $s;
-}
-
 
 # given a list of stack frames, return a new list with only
 # line and subroutine.
@@ -141,6 +112,24 @@ sub strip_stack_inc_args {
         return $stack;  # not was expected, return the whole thing
     }
     return [ map { { line => $_->{line}, subroutine => $_->{subroutine}, args => $_->{args} } } @{$stack->{data}} ];
+}
+
+# recursively remove all occurances of __refaddr
+sub strip_refaddr {
+    my $value = shift;
+
+    return unless ref $value;
+
+    if ($value->{__reftype} && $value->{__refaddr}) {
+        delete $value->{__refaddr};
+        return unless exists($value->{__value});
+        my $reftype = ref($value->{__value});
+        if ($reftype eq 'ARRAY') {
+            strip_refaddr($_) foreach @{$value->{__value}};
+        } elsif ($reftype eq 'HASH') {
+            strip_refaddr($_) foreach (values %{$value->{__value}});
+        }
+    }
 }
 
 

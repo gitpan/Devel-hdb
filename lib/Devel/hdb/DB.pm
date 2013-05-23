@@ -136,6 +136,14 @@ sub input_trace_file {
     $trace = 1;
 }
 
+sub file_source {
+    my($class, $file) = @_;
+
+    my $glob = $main::{'_<' . $file};
+    return unless $glob;
+    return *{$glob}{ARRAY};
+}
+
 sub is_breakpoint {
     my($package, $filename, $line, $subroutine) = @_;
 
@@ -190,12 +198,13 @@ BEGIN {
             $long_call = undef;   # Cancel any pending long call in the child
             $app->notify_child_process_is_forked();
 
-            # These should make it stop after returning from the fork
-            # It's cut-and-paste from Devel::hdb::App::stepout()
-            $DB::single=0;
-            $DB::step_over_depth = $DB::stack_depth - 1;
-            $tracker = _new_stack_tracker($pid);
         }
+
+        # These should make it stop after returning from the fork
+        # It's cut-and-paste from Devel::hdb::App::stepout()
+        $DB::single=0;
+        $DB::step_over_depth = $DB::stack_depth - 1;
+        $tracker = _new_stack_tracker($pid);
         return $pid;
     };
 };
