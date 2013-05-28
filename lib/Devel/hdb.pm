@@ -8,7 +8,7 @@ use Devel::hdb::DB;
 use IO::Socket::INET;
 use IO::File;
 
-our $VERSION = 0.08_01;
+our $VERSION = 0.09;
 
 sub import {
     my $class = shift;
