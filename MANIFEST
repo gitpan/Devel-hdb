@@ -66,6 +66,7 @@ t/04-inactive-brekpoint.t
 t/05-loaded-files.t
 t/05-source-file.t
 t/06-eval-blessed.t
+t/06-eval-tied.t
 t/06-eval.t
 t/07-step-out.t
 t/08-action.t
