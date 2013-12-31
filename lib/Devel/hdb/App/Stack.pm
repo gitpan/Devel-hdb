@@ -64,7 +64,8 @@ sub _stack {
     }
     # TODO: put this into the above loop
     for (my $i = 0; $i < @stack-1; $i++) {
-        @{$stack[$i]}{'subroutine','subname','args'} = @{$stack[$i+1]}{'subroutine','subname','args'};
+        @{$stack[$i]}{qw(subroutine subname args wantarray evaltext hasargs is_require)}
+            = @{$stack[$i+1]}{qw(subroutine subname args wantarray evaltext hasargs is_require)};
     }
     $stack[-1]->{subroutine} = 'MAIN';
     $stack[-1]->{subname} = 'MAIN';
@@ -94,7 +95,7 @@ within the debugger.  The currently executing frame is the first element in
 the list.  Returns a JSON-encoded array where each item is a hash
 with the following keys:
   package       Package/namespace
-  subroutine    Fully-qualified subroutine name.  Includes the pacakge
+  subroutine    Fully-qualified subroutine name.  Includes the package
   subname       Subroutine name without the package included
   filename      File where the subroutine was defined
   lineno        Line execution is stopped on

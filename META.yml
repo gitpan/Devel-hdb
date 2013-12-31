@@ -39,4 +39,4 @@ requires:
   warnings: 0
 resources:
   repository: https://github.com/amb43790/Devel-hdb.git
-version: 0.10
+version: 0.11
