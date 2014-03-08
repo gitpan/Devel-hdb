@@ -10,7 +10,7 @@ use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 13;
+    plan tests => 12;
 }
 
 my $url = start_test_program();
@@ -23,7 +23,7 @@ my $resp = $mech->get($url.'stack');
 ok($resp->is_success, 'Request stack position');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-    [ { line => 1, subroutine => 'MAIN' } ],
+    [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
 $resp = $mech->get($url.'stepin');
@@ -31,7 +31,7 @@ ok($resp->is_success, 'step in');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
     [ { line => 1, subroutine => '(eval)' },
-      { line => 1, subroutine => 'MAIN' } ],
+      { line => 1, subroutine => 'main::MAIN' } ],
     'Still stopped on line 1, in the eval');
 
 $resp = $mech->get($url.'stepin');
@@ -40,7 +40,7 @@ $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
   [ { line => 4, subroutine => 'main::foo' },
     { line => 1, subroutine => '(eval)' },
-    { line => 1, subroutine => 'MAIN' } ],
+    { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 4, frame above is line 1');
 
 $resp = $mech->get($url.'stepin');
@@ -50,26 +50,25 @@ is_deeply($stack,
   [ { line => 8, subroutine => 'main::bar' },
     { line => 4, subroutine => 'main::foo' },
     { line => 1, subroutine => '(eval)' },
-    { line => 1, subroutine => 'MAIN' } ],
+    { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 8, frames above are lines 4 and 1');
 
 $resp = $mech->get($url.'stepin');
 ok($resp->is_success, 'step in');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-  [ { line => 2, subroutine => 'MAIN' } ],
+  [ { line => 2, subroutine => 'main::MAIN' } ],
     'Stopped on line 2 after the eval');
 
 $resp = $mech->get($url.'stepin');
 ok($resp->is_success, 'step in');
-# expecting 'stack' and 'termination' messages
-my @messages = sort { $a->{type} cmp $b->{type} } @{ $json->decode($resp->content) };
-is($messages[0]->{data}->[0]->{subroutine},
-    'DB::fake::at_exit',
-    'Stopped in at_exit()');
-is_deeply($messages[1],
-    { type => 'termination', data => { exit_code => 2 } },
-    'Got termination message');
+$stack = strip_stack($json->decode($resp->content));
+is_deeply($stack,
+    [ { line => 12, subroutine => 'main::END' },
+      { line => 2, subroutine => '(eval)' },
+      { line => 2, subroutine => 'main::MAIN' },
+    ],
+    'Stopped in END block');
 
 
 __DATA__
@@ -82,4 +81,7 @@ sub foo {
 sub bar {
     die "8";
     9;
+}
+END {
+    12;
 }

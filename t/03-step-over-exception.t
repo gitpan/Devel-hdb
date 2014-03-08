@@ -23,7 +23,7 @@ my $resp = $mech->get($url.'stack');
 ok($resp->is_success, 'Request stack position');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-    [ { line => 1, subroutine => 'MAIN' } ],
+    [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
 $resp = $mech->get($url.'stepover');
@@ -31,28 +31,28 @@ ok($resp->is_success, 'step over');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
     [ { line => 1, subroutine => '(eval)' },
-      { line => 1, subroutine => 'MAIN' } ],
+      { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped inside the eval line 1');
 
 $resp = $mech->get($url.'stepover');
 ok($resp->is_success, 'step over');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-  [ { line => 2, subroutine => 'MAIN' } ],
+  [ { line => 2, subroutine => 'main::MAIN' } ],
     'Stopped on line 2');
 
 $resp = $mech->get($url.'stepover');
 ok($resp->is_success, 'step over');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-  [ { line => 3, subroutine => 'MAIN' } ],
+  [ { line => 3, subroutine => 'main::MAIN' } ],
     'Stopped on line 3');
 
 $resp = $mech->get($url.'stepover');
 ok($resp->is_success, 'step over');
 my @messages = sort { $a->{type} cmp $b->{type} } @{ $json->decode($resp->content) };
 is($messages[0]->{data}->[0]->{subroutine},
-    'DB::fake::at_exit',
+    'Devel::Chitin::exiting::at_exit',
     'Stopped in at_exit()');
 is_deeply($messages[1],
     { type => 'termination', data => { exit_code => 2 } },

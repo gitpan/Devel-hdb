@@ -3,6 +3,7 @@ abstract: 'A Perl debugger implemented as a REST service and accompanying browse
 author:
   - 'Anthony Brummett <brummett@cpan.org>'
 build_requires:
+  Devel::Chitin::Actionable: 0
   Fcntl: 0
   File::Basename: 0
   File::Temp: 0
@@ -22,13 +23,13 @@ meta-spec:
 name: Devel-hdb
 requires:
   Data::Dumper: 0
+  Devel::Chitin: 0
   Exporter: 0
   HTTP::Server::PSGI: 0
   IO::File: 0
   IO::Socket::INET: 0
   JSON: 0
   LWP::UserAgent: 0
-  PadWalker: 0
   Plack::Request: 0
   Scalar::Util: 0
   Socket: 0
@@ -39,4 +40,4 @@ requires:
   warnings: 0
 resources:
   repository: https://github.com/amb43790/Devel-hdb.git
-version: 0.11
+version: 0.12

@@ -10,7 +10,7 @@ use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 15;
+    plan tests => 19;
 }
 
 my $url = start_test_program();
@@ -25,21 +25,21 @@ $stack = $json->decode($resp->content);
 my $filename = $stack->{data}->[0]->{filename};
 $stack = strip_stack($stack);
 is_deeply($stack,
-    [ { line => 1, subroutine => 'MAIN' } ],
+    [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 7, a => '$a++'});
+$resp = $mech->post("${url}action", { f => $filename, l => 7, c => '$a++'});
 ok($resp->is_error, 'Cannot set action on unbreakable line');
 is($resp->code, 403, 'Error was Forbidden');
 
-$resp = $mech->post("${url}breakpoint", { f => 'garbage', l=> 123, a => '$a++'});
+$resp = $mech->post("${url}action", { f => 'garbage', l=> 123, c => '$a++'});
 ok($resp->is_error, 'Cannot set action on unknown file');
 is($resp->code, 404, 'Error was Not Found');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 4, a => '$a++'});
+$resp = $mech->post("${url}action", { f => $filename, l => 4, c => '$a++'});
 ok($resp->is_success, 'Set action for line 4');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 6, a => '$a++'});
+$resp = $mech->post("${url}action", { f => $filename, l => 6, c => '$a++'});
 ok($resp->is_success, 'Set action for line 6');
 
 
@@ -68,6 +68,20 @@ is_deeply($answer,
     },
     'value is correct - action incremented $a');
 
+
+$resp = $mech->get("${url}delete-action?f=${filename}&l=4");
+ok($resp->is_success, 'Delete action on line 4');
+is_deeply( $json->decode( $resp->content ),
+    { type => 'delete-action', data => { filename => $filename, lineno => 4 }},
+    'delete response ok');
+
+$resp = $mech->get("${url}actions");
+ok($resp->is_success, 'Get all actions');
+is_deeply($json->decode( $resp->content ),
+    [ { type => 'action',
+        data => { filename => $filename, lineno => 6, code => '$a++'}
+    } ],
+    'One action remaining');
 
 
 

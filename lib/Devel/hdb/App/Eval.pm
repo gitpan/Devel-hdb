@@ -22,16 +22,17 @@ sub do_eval {
     my($class, $app, $env) = @_;
 
     my $req = Plack::Request->new($env);
-    my $eval_string = $req->content();
+    my $expr = $req->content();
+    my $eval_string = _fixup_expr_for_eval($expr);
 
     my $resp = Devel::hdb::Response->new('evalresult', $env);
 
     my $result_packager = sub {
         my $data = shift;
-        $data->{expr} = $eval_string;
+        $data->{expr} = $expr;
         return $data;
     };
-    return _eval_plumbing_closure($eval_string,$resp, $env, $result_packager);
+    return _eval_plumbing_closure($app, $eval_string,$resp, $env, $result_packager);
 }
 
 my %perl_special_vars = map { $_ => 1 }
@@ -64,27 +65,28 @@ sub do_getvar {
             $data->{level} = $level;
             return $data;
         };
-        return _eval_plumbing_closure($varname, $resp, $env, $result_packager);
+        return _eval_plumbing_closure($app,$varname, $resp, $env, $result_packager);
     }
 
-    my $adjust = DB->_first_program_frame();
-    my $value = eval { DB->get_var_at_level($varname, $level + $adjust - 1) };
+    my $value = eval { $app->get_var_at_level($varname, $level) };
     my $exception = $@;
 
+    my $resp_data = { expr => $varname, level => $level };
     if ($exception) {
         if ($exception =~ m/Can't locate PadWalker/) {
             $resp->{type} = 'error';
             $resp->data('Not implemented - PadWalker module is not available');
 
         } elsif ($exception =~ m/Not nested deeply enough/) {
-            $resp->data( { expr => $varname, level => $level, result => undef } );
+            $resp_data->{result} = undef;
         } else {
             die $exception
         }
     } else {
         $value = encode_perl_data($value);
-        $resp->data( { expr => $varname, level => $level, result => $value } );
+        $resp_data->{result} = $value;
     }
+    $resp->data($resp_data);
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
             [ $resp->encode() ]
@@ -92,30 +94,45 @@ sub do_getvar {
 }
 
 sub _eval_plumbing_closure {
-    my($eval_string, $resp, $env, $result_packager) = @_;
+    my($app, $eval_string, $resp, $env, $result_packager) = @_;
 
-    $DB::eval_string = $eval_string;
+    $eval_string = _fixup_expr_for_eval($eval_string);
     return sub {
         my $responder = shift;
         my $writer = $responder->([ 200, [ 'Content-Type' => 'application/json' ]]);
         $env->{'psgix.harakiri.commit'} = Plack::Util::TRUE;
 
-        DB->long_call(
-            DB->prepare_eval(
-                $eval_string,
-                sub {
-                    my $data = shift;
-                    $data->{result} = encode_perl_data($data->{result}) if ($data->{result});
-                    $data = $result_packager->($data);
-
-                    $resp->data($data);
-                    $writer->write($resp->encode());
-                    $writer->close();
+        $app->eval(
+            $eval_string,
+            1,
+            sub {
+                my($result, $exception) = @_;
+                my $data;
+                if ($exception) {
+                    $data->{exception} = encode_perl_data($exception);
+                } else {
+                    $data->{result} = encode_perl_data(@$result < 2 ? $result->[0] : $result );
                 }
-            )
+                $data = $result_packager->($data);
+
+                $resp->data($data);
+                $writer->write($resp->encode());
+                $writer->close();
+            }
         );
     };
 }
+
+# This substitution is done so that we return HASH, as opposed to a list
+# An expression of %hash results in a list of key/value pairs that can't
+# be distinguished from a list.  A glob gets replaced by a glob ref.
+sub _fixup_expr_for_eval {
+    my($expr) = @_;
+
+    $expr =~ s/^\s*(?<!\\)([%*])/\\$1/o;
+    return $expr;
+}
+
 
 
 1;
@@ -173,5 +190,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.

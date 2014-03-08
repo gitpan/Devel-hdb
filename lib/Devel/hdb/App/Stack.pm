@@ -12,7 +12,7 @@ use base 'Devel::hdb::App::Base';
 use Devel::hdb::Response;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(_stack);
+our @EXPORT_OK = qw(_serialize_stack);
 
 use Devel::hdb::App::EncodePerlData qw(encode_perl_data);
 
@@ -22,7 +22,7 @@ sub stack {
     my($class, $app, $env) = @_;
 
     my $resp = Devel::hdb::Response->new('stack', $env);
-    $resp->data( $class->_stack($app) );
+    $resp->data( $class->_serialize_stack($app));
 
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
@@ -30,49 +30,24 @@ sub stack {
         ];
 }
 
-sub _stack {
-    my $class = shift;
-    my $app = shift;
-
-    my $discard = 1;
+sub _serialize_stack {
+    my($class, $app) = @_;
+    my $frames = $app->stack()->iterator;
     my @stack;
-    my $next_AUTOLOAD_name = $#DB::AUTOLOAD_names;
-    our @saved_ARGV;
+    while (my $frame = $frames->()) {
+        my %frame = %$frame;  # copy
 
-    for (my $i = 0; ; $i++) {
-        my %caller;
-        {
-            package DB;
-            @caller{qw( package filename line subroutine hasargs wantarray
-                        evaltext is_require )} = caller($i);
+        if ($frame{autoload}) {
+            $frame{subname} .= "($frame{autoload})";
         }
-        last unless defined ($caller{line});
-        # Don't include calls within the debugger
-        if ($caller{subroutine} eq 'DB::DB') {
-            $discard = 0;
-        }
-        next if $discard;
 
-        $caller{args} = [ map { encode_perl_data($_) } @DB::args ]; # unless @stack;
-        $caller{subname} = $caller{subroutine} =~ m/\b(\w+$|__ANON__)/ ? $1 : $caller{subroutine};
-        if ($caller{subname} eq 'AUTOLOAD') {
-            $caller{subname} .= '(' . ($DB::AUTOLOAD_names[ $next_AUTOLOAD_name-- ] =~ m/::(\w+)$/)[0] . ')';
-        }
-        $caller{level} = $i;
+        my @encoded_args = map { encode_perl_data($_) } @{$frame{args}};
+        $frame{args} = \@encoded_args;
 
-        push @stack, \%caller;
+        push @stack, \%frame;
     }
-    # TODO: put this into the above loop
-    for (my $i = 0; $i < @stack-1; $i++) {
-        @{$stack[$i]}{qw(subroutine subname args wantarray evaltext hasargs is_require)}
-            = @{$stack[$i+1]}{qw(subroutine subname args wantarray evaltext hasargs is_require)};
-    }
-    $stack[-1]->{subroutine} = 'MAIN';
-    $stack[-1]->{subname} = 'MAIN';
-    $stack[-1]->{args} = \@saved_ARGV; # These are guaranteed to be simple scalars, no need to encode
     return \@stack;
 }
-
 
 1;
 
@@ -117,5 +92,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.

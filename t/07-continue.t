@@ -10,7 +10,7 @@ use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 7;
+    plan tests => 5;
 }
 
 my $url = start_test_program();
@@ -26,32 +26,22 @@ is_deeply($stack,
     [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
-$resp = $mech->get($url.'stepover');
-ok($resp->is_success, 'step over');
-$stack = strip_stack($json->decode($resp->content));
-is_deeply($stack,
-  [ { line => 2, subroutine => 'main::MAIN' } ],
-    'Stopped on line 2');
-
-$resp = $mech->get($url.'stepover');
-ok($resp->is_success, 'step over');
-my $message = $json->decode($resp->content);
-is($message->[0]->{data}->[0]->{subroutine},
+$resp = $mech->get($url.'continue');
+ok($resp->is_success, 'continue');
+# Expecting 'stack' and 'termination' messages
+my @messages = sort { $a->{type} cmp $b->{type} } @{ $json->decode($resp->content) };
+is($messages[0]->{data}->[0]->{subroutine},
     'Devel::Chitin::exiting::at_exit',
     'Stopped in at_exit()');
-is_deeply($message->[1],
-    { type => 'termination', data => { exit_code => 2 } },
+is_deeply($messages[1],
+    { type => 'termination', data => { exit_code => 3 } },
     'Got termination message');
 
-
-__DATA__
+__END__
+1;
 foo();
-exit(2);
+exit(3);
 sub foo {
-    bar();
-    GOTO_TARGET:
-    1;
+    5;
 }
-sub bar {
-    goto GOTO_TARGET;
-}
+

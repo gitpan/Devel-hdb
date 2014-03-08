@@ -9,13 +9,11 @@ use Devel::hdb::Response;
 
 __PACKAGE__->add_route('get', '/exit', \&do_terminate);
 
-# Exit the running program
-# Sets up as a long_call so we can send the 'hangup' response
-# and then exit()
+# Exit the running program and then exit()
 sub do_terminate {
     my($class, $app, $env) = @_;
     my $json = $app->{json};
-    DB->user_requested_exit();
+    $app->user_requested_exit();
     return sub {
         my $responder = shift;
         my $writer = $responder->([ 200, [ 'Content-Type' => 'application/json' ]]);
@@ -50,5 +48,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.

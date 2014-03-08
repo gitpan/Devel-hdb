@@ -22,7 +22,7 @@ sub sourcefile {
     my $filename = $req->param('f');
 
     my @rv;
-    if (my $file = DB->file_source($filename)) {
+    if (my $file = $app->file_source($filename)) {
         no warnings 'uninitialized';  # at program termination, the loaded file data can be undef
         no warnings 'numeric';        # eval-ed "sources" generate "not-numeric" warnings
         @rv = map { [ $_, $_ + 0 ] } @$file;
@@ -42,7 +42,7 @@ sub loaded_files {
 
     my $resp = Devel::hdb::Response->new('loadedfiles', $env);
 
-    my @files = DB->loaded_files();
+    my @files = $app->loaded_files();
     $resp->data(\@files);
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
@@ -94,5 +94,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.

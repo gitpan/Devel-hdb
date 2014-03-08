@@ -23,21 +23,21 @@ my $resp = $mech->get($url.'stack');
 ok($resp->is_success, 'Request stack position');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-    [ { line => 1, subroutine => 'MAIN' } ],
+    [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
 $resp = $mech->get($url.'continue');
 ok($resp->is_success, 'continue');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-    [ { line => 4, subroutine => 'MAIN' } ],
+    [ { line => 4, subroutine => 'main::MAIN' } ],
     'Stopped on line 4');
 
 $resp = $mech->get($url.'continue');
 ok($resp->is_success, 'continue');
 my $message = $json->decode($resp->content);
 is($message->[0]->{data}->[0]->{subroutine},
-    'DB::fake::at_exit',
+    'Devel::Chitin::exiting::at_exit',
     'Stopped in at_exit()');
 is_deeply($message->[1],
     { type => 'termination', data => { exit_code => 2 } },

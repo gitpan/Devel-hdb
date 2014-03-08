@@ -10,7 +10,7 @@ use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 13;
+    plan tests => 14;
 }
 
 my $url = start_test_program();
@@ -25,7 +25,7 @@ $stack = $json->decode($resp->content);
 my $filename = $stack->{data}->[0]->{filename};
 $stack = strip_stack($stack);
 is_deeply($stack,
-    [ { line => 3, subroutine => 'MAIN' } ],
+    [ { line => 3, subroutine => 'main::MAIN' } ],
     'Stopped on line 3');
 
 $resp = $mech->post("${url}breakpoint", { f => $filename, l => 3, c => 1});
@@ -34,7 +34,7 @@ ok($resp->is_success, 'Set breakpoint for line 3');
 $resp = $mech->post("${url}breakpoint", { f => $filename, l => 4, c => 1});
 ok($resp->is_success, 'Set breakpoint for line 4');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 5, c => 1, a => '$global = 1'});
+$resp = $mech->post("${url}breakpoint", { f => $filename, l => 5, c => 1 });
 ok($resp->is_success, 'Set breakpoint and action for line 5');
 
 $resp = $mech->post("${url}breakpoint", { f => 't/TestNothing.pm', l => 3, c => 1});
@@ -49,13 +49,13 @@ my @bp = sort { $a->{data}->{filename} cmp $b->{data}->{filename}
 is_deeply( \@bp,
     [
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 3, condition => 1 } },
+            data => { filename => $filename, lineno => 3, code => 1 } },
       {     type => 'breakpoint', 
-            data => { filename => $filename, lineno => 4, condition => 1 } },
+            data => { filename => $filename, lineno => 4, code => 1 } },
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 5, condition => 1, action => '$global = 1' } },
+            data => { filename => $filename, lineno => 5, code => 1 } },
       {     type => 'breakpoint',
-            data => { filename => 't/TestNothing.pm', lineno => 3, condition => 1 } },
+            data => { filename => 't/TestNothing.pm', lineno => 3, code => 1 } },
     ],
     'Got all set breakpoints'
 );
@@ -66,17 +66,20 @@ ok($resp->is_success, 'Get all breakpoints for main file');
 is_deeply( \@bp,
     [
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 3, condition => 1 } },
+            data => { filename => $filename, lineno => 3, code => 1 } },
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 4, condition => 1 } },
+            data => { filename => $filename, lineno => 4, code => 1 } },
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 5, condition => 1, action => '$global = 1' } }
+            data => { filename => $filename, lineno => 5, code => 1 } }
     ],
     'Got all set breakpoints'
 );
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 4, c => undef});
+$resp = $mech->get("${url}delete-breakpoint?f=${filename}&l=4");
 ok($resp->is_success, 'Remove breakpoint for line 4');
+is_deeply($json->decode($resp->content),
+    { type => 'delete-breakpoint', data => { filename => $filename, lineno => 4 }},
+    'delete response is ok');
 
 $resp = $mech->get('breakpoints?f='.$filename);
 ok($resp->is_success, 'Get all breakpoints for main file');
@@ -84,9 +87,9 @@ ok($resp->is_success, 'Get all breakpoints for main file');
 is_deeply( \@bp,
     [
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 3, condition => 1 } },
+            data => { filename => $filename, lineno => 3, code => 1 } },
       {     type => 'breakpoint',
-            data => { filename => $filename, lineno => 5, condition => 1, action => '$global = 1' } }
+            data => { filename => $filename, lineno => 5, code => 1 } }
     ],
     'Got all set breakpoints'
 );

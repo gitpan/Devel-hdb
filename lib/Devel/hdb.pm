@@ -4,16 +4,18 @@ use strict;
 package Devel::hdb;
 
 use Devel::hdb::App;
-use Devel::hdb::DB;
+use Devel::hdb::TraceFollow;
 use IO::Socket::INET;
 use IO::File;
 
-our $VERSION = 0.11;
+our $VERSION = 0.12;
 
 sub import {
     my $class = shift;
 
     our $TESTHARNESS;
+    my($trace, $follow);
+
     while (@_) {
         my $param = shift;
         if ($param =~ m/port:(\d+)/) {
@@ -25,19 +27,28 @@ sub import {
         } elsif ($param eq 'testharness') {
             $TESTHARNESS = 1;
         } elsif ($param =~ m/trace:(.*)/) {
-            print STDERR "Writing execution trace to $1...\n" unless $TESTHARNESS;
-            DB->disable_stopping(1);
-            unless($DB::trace = IO::File->new($1, 'w')) {
-                die "Can't open trace file for writing: $!";
-            }
+            $trace = $1;
         } elsif ($param =~ m/follow:(.*)/) {
-            DB->input_trace_file($1, sub { Devel::hdb::App->get()->notify_trace_diff(@_) });
+            $follow = $1;
         } elsif ($param =~ m/listenfd:(\d+)/) {
             our $LISTEN_SOCK = IO::Socket::INET->new();
             $LISTEN_SOCK->fdopen($1, 'r');
         }
 
     }
+
+    my $self = Devel::hdb::App->get();
+    if ($trace) {
+        print STDERR "Writing execution trace to $trace...\n" unless $TESTHARNESS;
+        $self->{trace} = Devel::hdb::Trace->new($trace);
+    } elsif ($follow) {
+        $self->{follow} = Devel::hdb::Follow->new(
+                            $follow,
+                            sub { $self->notify_trace_diff(@_) }
+                        );
+    }
+
+    $self->attach();
 }
 1;
 __END__
@@ -146,6 +157,11 @@ the watch window, click on the "+".  To remove a watched expression, click on
 the "x" next to its name.  Composite types like Hashes and arrays have a blue
 circled number indicating how many elements belong to it.  To collapse/expand
 them, click the blue circle.
+
+A watched typeglob will show all the used slots within the glob.  Older
+versions of perl will always create an undefined value in the SCALAR slot.
+The value for the IO slot will be the file descriptor number of the
+filehandle, or undef if it is closed.
 
 =head3 Key bindings
 
@@ -263,6 +279,6 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.
 

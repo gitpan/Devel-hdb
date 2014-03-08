@@ -25,7 +25,7 @@ $stack = $json->decode($resp->content);
 my $filename = $stack->{data}->[0]->{filename};
 $stack = strip_stack($stack);
 is_deeply($stack,
-    [ { line => 1, subroutine => 'MAIN' } ],
+    [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
 $resp = $mech->post("${url}breakpoint", { f => $filename, l => 4, c=> 1});
@@ -44,14 +44,14 @@ $resp = $mech->get($url.'continue');
 ok($resp->is_success, 'continue');
 $stack = strip_stack($json->decode($resp->content));
 is_deeply($stack,
-    [ { line => 3, subroutine => 'MAIN' } ],
+    [ { line => 3, subroutine => 'main::MAIN' } ],
     'Stopped on line 3');
 
 $resp = $mech->get($url.'continue');
 ok($resp->is_success, 'continue');
 my $message = $json->decode($resp->content);
 is($message->[0]->{data}->[0]->{subroutine},
-    'DB::fake::at_exit',
+    'Devel::Chitin::exiting::at_exit',
     'Stopped in at_exit()');
 is_deeply($message->[1],
     { type => 'termination', data => { exit_code => 0 } },

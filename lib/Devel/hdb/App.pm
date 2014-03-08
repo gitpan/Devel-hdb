@@ -3,10 +3,8 @@ use strict;
 
 package Devel::hdb::App;
 
-BEGIN {
-    our $ORIGINAL_PID = $$;
-}
-
+use Devel::Chitin;
+use base 'Devel::Chitin';
 use Devel::hdb::Server;
 use IO::File;
 use LWP::UserAgent;
@@ -87,6 +85,7 @@ sub init_debugger {
     require Devel::hdb::App::Terminate;
     require Devel::hdb::App::PackageInfo;
     require Devel::hdb::App::Breakpoint;
+    require Devel::hdb::App::Action;
     require Devel::hdb::App::SourceFile;
     require Devel::hdb::App::Eval;
     require Devel::hdb::App::AnnounceChild;
@@ -115,9 +114,16 @@ sub _announce {
 }
 
 
+sub notify_stopped {
+    my($self, $location) = @_;
+
+    my $cb = delete $self->{at_next_breakpoint};
+    $cb && $cb->();
+}
+
 # Called in the parent process after a fork
-sub notify_parent_child_was_forked {
-    my($self, $child_pid) = @_;
+sub notify_fork_parent {
+    my($self, $location, $child_pid) = @_;
 
     my $gotit = sub {
         my($rv,$env) = @_;
@@ -125,14 +131,17 @@ sub notify_parent_child_was_forked {
     };
     $self->{router}->once_after('POST','/announce_child', $gotit);
     $self->run();
+    $self->step;
 }
 
 # called in the child process after a fork
-sub notify_child_process_is_forked {
+sub notify_fork_child {
     my $self = shift;
+    my $location = shift;
+
+    delete $self->{at_next_breakpoint};
 
     $parent_pid = undef;
-    our($ORIGINAL_PID) = $$;
     my $parent_base_url = $self->{base_url};
 
     my $announced;
@@ -152,6 +161,7 @@ sub notify_child_process_is_forked {
 
     # Force it to pick a new port
     $self->_make_listen_socket(port => undef, server_ready => $when_ready);
+    $self->step;
 }
 
 
@@ -168,27 +178,49 @@ sub app {
 
 sub run {
     my $self = shift;
-    return $self->{server}->run($self->app);
+    $self->{server}->run($self->app);
+    1;
+}
+*idle = \&run;
+
+# If we're in trace mode, then don't stop
+sub poll {
+    my $self = shift;
+    return ! $self->{trace};
 }
 
 sub notify_trace_diff {
     my($self, $trace_data) = @_;
 
+    my $follower = delete $self->{follow};
+    $follower->shutdown();
+    $self->step();
+
     my $msg = Devel::hdb::Response->queue('trace_diff');
     $msg->{data} = $trace_data;
 }
 
+sub notify_uncaught_exception {
+    my $self = shift;
+    my $exception = shift;
+
+    $self->{__exception__} = $exception;
+}
+
 sub notify_program_terminated {
-    my $class = shift;
+    my $self = shift;
     my $exit_code = shift;
-    my $exception_data = shift;
 
     print STDERR "Debugged program pid $$ terminated with exit code $exit_code\n" unless ($Devel::hdb::TESTHARNESS);
     my $msg = Devel::hdb::Response->queue('termination');
-    if ($exception_data) {
-        $msg->{data} = $exception_data;
+    my $data = { exit_code => $exit_code };
+
+    if ($self->{__exception__}) {
+        foreach my $prop ( qw(package line filename exception subroutine)) {
+            $data->{$prop} = $self->{__exception__}->$prop;
+        }
     }
-    $msg->{data}->{exit_code} = $exit_code;
+    $msg->data($data);
 }
 
 sub notify_program_exit {
@@ -221,13 +253,12 @@ sub load_settings_from_file {
 
     my @set_breakpoints;
     foreach my $bp ( @{ $settings->{breakpoints}} ) {
-        my %req;
-        foreach my $key ( qw( condition condition_inactive action action_inactive ) ) {
-            $req{$key} = $bp->{$key} if (exists $bp->{$key});
-        }
         push @set_breakpoints,
-            Devel::hdb::App::Breakpoint->set_breakpoint_and_respond($bp->{filename}, $bp->{lineno}, %req);
-        #$resp->data( $resp_data );
+            Devel::hdb::App::Breakpoint->set_and_respond($self, %$bp);
+    }
+    foreach my $action ( @{ $settings->{actions}} ) {
+        push @set_breakpoints,
+            Devel::hdb::App::Action->set_and_respond($self, %$action);
     }
     return @set_breakpoints;
 }
@@ -240,9 +271,11 @@ sub save_settings_to_file {
         $file = $self->settings_file();
     }
 
-    my @breakpoints = DB->get_breakpoint();
+    my @breakpoints = $self->get_breaks();
+    my @actions = $self->get_actions();
     my $fh = IO::File->new($file, 'w') || die "Can't open $file for writing: $!";
-    $fh->print( Data::Dumper->new([{ breakpoints => \@breakpoints}])->Terse(1)->Dump());
+    my $config = { breakpoints => \@breakpoints, actions => \@actions };
+    $fh->print( Data::Dumper->new([ $config ])->Terse(1)->Dump());
     return $file;
 }
 

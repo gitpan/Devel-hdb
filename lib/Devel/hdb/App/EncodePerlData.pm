@@ -72,7 +72,7 @@ sub encode_perl_data {
                 $tmpvalue{CODE} = *{$value}{CODE};
             }
             if (*{$value}{IO}) {
-                $tmpvalue{IO} = 'fileno '.fileno(*{$value}{IO});
+                $tmpvalue{IO} = encode_perl_data(fileno(*{$value}{IO}));
             }
             $value = \%tmpvalue;
         } elsif (($reftype eq 'REGEXP')
@@ -179,5 +179,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.

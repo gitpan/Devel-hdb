@@ -6,7 +6,6 @@ use warnings;
 use base 'Devel::hdb::App::Base';
 
 use Devel::hdb::Response;
-use Devel::hdb::DB::PackageInfo;
 
 __PACKAGE__->add_route('get', qr(/pkginfo/((\w+)(::\w+)*)), \&pkginfo);
 __PACKAGE__->add_route('get', qr(/subinfo/((\w+)(::\w+)*)), \&subinfo);
@@ -16,9 +15,9 @@ sub pkginfo {
     my($class, $app, $env, $package) = @_;
 
     my $resp = Devel::hdb::Response->new('pkginfo', $env);
-    my $sub_packages = Devel::hdb::DB::PackageInfo::namespaces_in_package($package);
-    my @subs = grep { Devel::hdb::DB::PackageInfo::sub_is_debuggable($package, $_) }
-                    @{ Devel::hdb::DB::PackageInfo::subs_in_package($package) };
+    my $sub_packages = _namespaces_in_package($package);
+    my @subs = grep { $app->subroutine_location("${package}::$_") }
+                    @{ _subs_in_package($package) };
 
     $resp->data({ packages => $sub_packages, subs => \@subs });
     return [ 200,
@@ -32,12 +31,50 @@ sub subinfo {
     my($class, $app, $env, $subname) = @_;
 
     my $resp = Devel::hdb::Response->new('subinfo', $env);
-    $resp->data( Devel::hdb::DB::PackageInfo::sub_info($subname));
-    return [ 200,
-            [ 'Content-Type' => 'application/json' ],
-            [ $resp->encode() ]
-        ];
+    my $loc = $app->subroutine_location($subname);
+
+    if ($loc) {
+        my @keys = qw( filename line end source source_line );
+        my %data;
+        @data{@keys} = map { $loc->$_ } @keys;
+        $resp->data(\%data);
+
+        return [ 200,
+                [ 'Content-Type' => 'application/json' ],
+                [ $resp->encode() ],
+            ];
+    } else {
+        return [ 404,
+                [ 'Content-Type' => 'text/html' ],
+                [ "$subname not found" ],
+            ];
+    }
 }
+
+sub _namespaces_in_package {
+    my $pkg = shift;
+
+    no strict 'refs';
+    return undef unless %{"${pkg}::"};
+
+    my @packages =  sort
+                    map { substr($_, 0, -2) }  # remove '::' at the end
+                    grep { m/::$/ }
+                    keys %{"${pkg}::"};
+    return \@packages;
+}
+
+sub _subs_in_package {
+    my $pkg = shift;
+
+    no strict 'refs';
+    my @subs =  sort
+                grep { defined &{"${pkg}::$_"} }
+                keys %{"${pkg}::"};
+    return \@subs;
+}
+
+
 
 1;
 
@@ -83,7 +120,7 @@ showing where in the original source code the text came from, and
 
 =head1 SEE ALSO
 
-Devel::hdb, Devel::hdb::DB::PackageInfo
+Devel::hdb
 
 =head1 AUTHOR
 
@@ -91,5 +128,5 @@ Anthony Brummett <brummett@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2013, Anthony Brummett.  This module is free software. It may
+Copyright 2014, Anthony Brummett.  This module is free software. It may
 be used, redistributed and/or modified under the same terms as Perl itself.
