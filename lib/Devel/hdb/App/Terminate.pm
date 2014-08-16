@@ -5,9 +5,7 @@ use warnings;
 
 use base 'Devel::hdb::App::Base';
 
-use Devel::hdb::Response;
-
-__PACKAGE__->add_route('get', '/exit', \&do_terminate);
+__PACKAGE__->add_route('post', '/exit', \&do_terminate);
 
 # Exit the running program and then exit()
 sub do_terminate {
@@ -16,10 +14,8 @@ sub do_terminate {
     $app->user_requested_exit();
     return sub {
         my $responder = shift;
-        my $writer = $responder->([ 200, [ 'Content-Type' => 'application/json' ]]);
+        my $writer = $responder->([ 204, [ 'Content-Type' => 'application/json' ]]);
 
-        my $resp = Devel::hdb::Response->new('hangup');
-        $writer->write($resp->encode);
         $writer->close();
         exit();
     };
@@ -35,7 +31,7 @@ Devel::hdb::App::Terminate - Terminate the debugged process
 
 =head1 DESCRIPTION
 
-Registers a route for GET /exit that terminates the debugged process, as
+Registers a route for POST /exit that terminates the debugged process, as
 well as the HTTP listener.
 
 =head1 SEE ALSO

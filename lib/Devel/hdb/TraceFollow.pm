@@ -129,7 +129,8 @@ sub notify_trace {
     my $at_subname  = $at_location->subroutine;
 
     # The expected next location
-    my($exp_location, $exp_package, $exp_file, $exp_line, $exp_subname) = split("\t", $self->_next_trace_line);
+    chomp(my $next_trace_line = $self->_next_trace_line);
+    my($exp_location, $exp_package, $exp_file, $exp_line, $exp_subname) = split("\t", $next_trace_line);
 
     my $should_stop;
     if (my ($expected_sub, $expected_offset) = $exp_location =~ m/(.*)\+(\d+)$/) {
@@ -147,7 +148,7 @@ sub notify_trace {
     }
 
     if ($should_stop) {
-        my($package) = $at_subname = ~ m/(.*)::(\w+)$/;
+        my($package) = $at_subname =~ m/(.*)::(\w+)$/;
         $package ||= 'main';
         my %diff_data = (
                 'package'   => $package,

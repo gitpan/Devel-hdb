@@ -3,7 +3,7 @@ use strict;
 
 package Devel::hdb::App;
 
-use Devel::Chitin;
+use Devel::Chitin 0.04;
 use base 'Devel::Chitin';
 use Devel::hdb::Server;
 use IO::File;
@@ -11,9 +11,11 @@ use LWP::UserAgent;
 use Data::Dumper;
 use Sys::Hostname;
 use IO::Socket::INET;
+use JSON qw();
+use Data::Transform::ExplicitMetadata;
+use Sub::Name qw(subname);
 
 use Devel::hdb::Router;
-use Devel::hdb::Response;
 
 use vars qw( $parent_pid ); # when running in the test harness
 
@@ -25,10 +27,32 @@ sub get {
 
     my $self = $APP_OBJ = bless {}, $class;
 
+    $self->_make_json_encoder();
     $self->_make_listen_socket();
 
     $parent_pid = eval { getppid() } if ($Devel::hdb::TESTHARNESS);
     return $self;
+}
+
+sub _make_json_encoder {
+    my $self = shift;
+    $self->{json} = JSON->new->utf8->allow_nonref();
+    return $self;
+}
+
+sub encode_json {
+    my $self = shift;
+    my $json = $self->{json};
+    return map { $json->encode($_) } @_;
+}
+
+sub decode_json {
+    my $self = shift;
+    my $json = $self->{json};
+    my @rv = map { $json->decode($_) } @_;
+    return wantarray
+        ? @rv
+        : $rv[0];
 }
 
 sub _make_listen_socket {
@@ -79,7 +103,6 @@ sub init_debugger {
     require Devel::hdb::App::Stack;
     require Devel::hdb::App::Control;
     require Devel::hdb::App::ProgramName;
-    require Devel::hdb::App::Ping;
     require Devel::hdb::App::Assets;
     require Devel::hdb::App::Config;
     require Devel::hdb::App::Terminate;
@@ -94,6 +117,11 @@ sub init_debugger {
 
 }
 
+sub _gui_url {
+    my $self = shift;
+    return $self->{base_url} . '/debugger-gui';
+}
+
 sub _announce {
     my $self = shift;
 
@@ -105,20 +133,37 @@ sub _announce {
     } elsif ($hostname ne '127.0.0.1') {
         $hostname = gethostbyaddr($s->sockaddr, AF_INET);
     }
-    $self->{base_url} = sprintf('http://%s:%d/',
+    $self->{base_url} = sprintf('http://%s:%d',
             $hostname, $s->sockport);
 
-    select STDOUT;
-    local $| = 1;
-    print "Debugger pid $$ listening on ",$self->{base_url},"\n" unless ($Devel::hdb::TESTHARNESS);
+    my $announce_url = $self->_gui_url;
+
+    STDOUT->printflush("Debugger pid $$ listening on $announce_url\n") unless ($Devel::hdb::TESTHARNESS);
 }
 
+sub on_notify_stopped {
+    my $self = shift;
+    if (@_) {
+        $self->{at_next_breakpoint} = shift;
+    }
+    return $self->{at_next_breakpoint};
+}
 
 sub notify_stopped {
     my($self, $location) = @_;
 
-    my $cb = delete $self->{at_next_breakpoint};
+    $self->current_location($location);
+    my $cb = $self->on_notify_stopped;
+    $self->on_notify_stopped(undef);
     $cb && $cb->();
+}
+
+sub current_location {
+    my $self = shift;
+    if (@_) {
+        $self->{current_location} = shift;
+    }
+    return $self->{current_location};
 }
 
 # Called in the parent process after a fork
@@ -134,15 +179,27 @@ sub notify_fork_parent {
     $self->step;
 }
 
+{
+    my $parent_process_base_url;
+    sub _parent_process_base_url {
+        my $self = shift;
+        if (@_) {
+            $parent_process_base_url = shift;
+        }
+        return $parent_process_base_url;
+    }
+}
+
 # called in the child process after a fork
 sub notify_fork_child {
     my $self = shift;
     my $location = shift;
 
-    delete $self->{at_next_breakpoint};
+    $self->on_notify_stopped(undef);
+    $self->dequeue_events();
 
     $parent_pid = undef;
-    my $parent_base_url = $self->{base_url};
+    my $parent_base_url = $self->_parent_process_base_url($self->{base_url});
 
     my $announced;
     my $when_ready = sub {
@@ -151,7 +208,7 @@ sub notify_fork_child {
             $self->_announce();
             my $ua = LWP::UserAgent->new();
             my $resp = $ua->post($parent_base_url
-                                . 'announce_child', { pid => $$, uri => $self->{base_url} });
+                                . '/announce_child', { pid => $$, uri => $self->{base_url}, gui => $self->_gui_url });
             unless ($resp->is_success()) {
                 print STDERR "sending announce failed... exiting\n";
                 exit(1) if ($Devel::hdb::TESTHARNESS);
@@ -165,9 +222,6 @@ sub notify_fork_child {
 }
 
 
-# Send back a data structure describing the call stack
-# stepin, stepover, stepout and run will call this to return
-# back to the debugger window the current state
 sub app {
     my $self = shift;
     unless ($self->{app}) {
@@ -196,35 +250,59 @@ sub notify_trace_diff {
     $follower->shutdown();
     $self->step();
 
-    my $msg = Devel::hdb::Response->queue('trace_diff');
-    $msg->{data} = $trace_data;
+    $trace_data->{type} = 'trace_diff';
+    $self->enqueue_event($trace_data);
 }
 
 sub notify_uncaught_exception {
     my $self = shift;
     my $exception = shift;
 
-    $self->{__exception__} = $exception;
+    my %event = ( type => 'exception',
+                  value => Data::Transform::ExplicitMetadata::encode($exception->exception) );
+    @event{'subroutine','package','filename','line'}
+        = map { $exception->$_ } qw(subroutine package filename line);
+    $self->enqueue_event(\%event);
+
+    my $exception_as_comment = '# ' . join("\n# ", split(/\n/, $exception->exception));
+    my $stopped = subname '__exception__' => eval qq(sub { \$self->step && (local \$DB::in_debugger = 0);\n# Uncaught exception:\n$exception_as_comment\n1;\n}\n);
+
+    @_ = ();
+    goto &$stopped;
+}
+
+sub exit_code {
+    my $self = shift;
+    if (@_) {
+        $self->{exit_code} = shift;
+    }
+    return $self->{exit_code};
 }
 
 sub notify_program_terminated {
     my $self = shift;
     my $exit_code = shift;
 
-    print STDERR "Debugged program pid $$ terminated with exit code $exit_code\n" unless ($Devel::hdb::TESTHARNESS);
-    my $msg = Devel::hdb::Response->queue('termination');
-    my $data = { exit_code => $exit_code };
+    $self->exit_code($exit_code);
+    $self->enqueue_event({ type => 'exit', value => $exit_code});
 
-    if ($self->{__exception__}) {
-        foreach my $prop ( qw(package line filename exception subroutine)) {
-            $data->{$prop} = $self->{__exception__}->$prop;
-        }
-    }
-    $msg->data($data);
+    print STDERR "Debugged program pid $$ terminated with exit code $exit_code\n" unless ($Devel::hdb::TESTHARNESS);
 }
 
 sub notify_program_exit {
-    my $msg = Devel::hdb::Response->queue('hangup');
+    my $self = shift;
+    $self->enqueue_event({ type => 'hangup' });
+}
+
+sub enqueue_event {
+    my $self = shift;
+    my $queue = $self->{'queued_events'} ||= [];
+    push @$queue, @_;
+}
+
+sub dequeue_events {
+    my $self = shift;
+    return delete $self->{'queued_events'};
 }
 
 sub settings_file {
@@ -241,6 +319,8 @@ sub load_settings_from_file {
         $file = $self->settings_file();
     }
 
+    return 0 unless -f $file;
+
     my $buffer;
     {
         local($/);
@@ -254,13 +334,13 @@ sub load_settings_from_file {
     my @set_breakpoints;
     foreach my $bp ( @{ $settings->{breakpoints}} ) {
         push @set_breakpoints,
-            Devel::hdb::App::Breakpoint->set_and_respond($self, %$bp);
+            Devel::hdb::App::Breakpoint->set_and_respond($self, $bp);
     }
     foreach my $action ( @{ $settings->{actions}} ) {
         push @set_breakpoints,
-            Devel::hdb::App::Action->set_and_respond($self, %$action);
+            Devel::hdb::App::Action->set_and_respond($self, $action);
     }
-    return @set_breakpoints;
+    return 1;
 }
 
 sub save_settings_to_file {
@@ -271,8 +351,14 @@ sub save_settings_to_file {
         $file = $self->settings_file();
     }
 
-    my @breakpoints = $self->get_breaks();
-    my @actions = $self->get_actions();
+    my $serializer = sub {
+        my %it = map { $_ => $_[0]->$_ } qw(line code inactive);
+        $it{filename} = $_[0]->file;
+        return \%it;
+    };
+
+    my @breakpoints = map { $serializer->($_) } $self->get_breaks();
+    my @actions = map { $serializer->($_) } $self->get_actions();
     my $fh = IO::File->new($file, 'w') || die "Can't open $file for writing: $!";
     my $config = { breakpoints => \@breakpoints, actions => \@actions };
     $fh->print( Data::Dumper->new([ $config ])->Terse(1)->Dump());

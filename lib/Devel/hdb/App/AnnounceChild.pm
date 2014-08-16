@@ -5,8 +5,6 @@ use warnings;
 
 use base 'Devel::hdb::App::Base';
 
-use Devel::hdb::Response;
-
 __PACKAGE__->add_route('post', '/announce_child', \&announce_child);
 
 sub announce_child {
@@ -15,17 +13,18 @@ sub announce_child {
     my $req = Plack::Request->new($env);
     my $child_pid = $req->param('pid');
     my $child_uri = $req->param('uri');
+    my $gui_uri = $req->param('gui');
 
-    my $resp = Devel::hdb::Response->queue('child_process', $env);
-    $resp->{data} = {
-            pid => $child_pid,
-            uri => $child_uri,
-            run => $child_uri . 'continue?nostop=1'
-        };
+    $app->enqueue_event({
+        type => 'fork',
+        pid => $child_pid,
+        href => $child_uri,
+        gui_href => $gui_uri,
+        continue_href => "${child_uri}/continue?nostop=1",
+    });
 
-    return [200, [], []];
+    return [204, [], []];
 }
-
 
 1;
 
@@ -44,11 +43,11 @@ listening at a particular URL.
 
 =over 4
 
-=item POST /announce_child
+=item POST /announce_child?pid=<pid>&uri=<uri>
 
 This route requires two parameters:
   pid   The process ID of the sending process
-  url   The URL of the debugger of the sending process
+  uri   The URL of the debugger of the sending process
 
 After a child process forks, it should contact the parent process' debugger
 at this route to notify the parent what URL it is listening for commands on.

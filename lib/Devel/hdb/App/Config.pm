@@ -5,53 +5,38 @@ use warnings;
 
 use base 'Devel::hdb::App::Base';
 
-use Devel::hdb::Response;
-
-__PACKAGE__->add_route('post', '/loadconfig', \&loadconfig);
-__PACKAGE__->add_route('post', '/saveconfig', \&saveconfig);
+__PACKAGE__->add_route('post', qr{/loadconfig/(.+)}, \&loadconfig);
+__PACKAGE__->add_route('post', qr{/saveconfig/(.+)}, \&saveconfig);
 
 sub loadconfig {
-    my($class, $app, $env) = @_;
+    my($class, $app, $env, $file) = @_;
 
-    my $req = Plack::Request->new($env);
-    my $file = $req->param('f');
+    my $result = eval { $app->load_settings_from_file($file) };
+    if ($@) {
+        return [ 400,
+                [ 'Content-Type' => 'text/html' ],
+                [ $@ ] ];
 
-    my @results = eval { $app->load_settings_from_file($file) };
-    my $load_resp = Devel::hdb::Response->new('loadconfig', $env);
-    if (! $@) {
-        foreach (@results) {
-            my $resp = Devel::hdb::Response->queue('breakpoint');
-            $resp->data($_);
-        }
-
-        $load_resp->data({ success => 1, filename => $file });
-
+    } elsif ($result ) {
+        return [ 204, [], [] ];
     } else {
-        $load_resp->data({ failed => $@ });
+        return [ 404,
+                [ 'Content-Type' => 'text/html' ],
+                [ "File $file not found" ] ];
     }
-    return [ 200,
-            [ 'Content-Type' => 'application/json'],
-            [ $load_resp->encode() ]
-        ];
 }
 
 sub saveconfig {
-    my($class, $app, $env) = @_;
-
-    my $req = Plack::Request->new($env);
-    my $file = $req->param('f');
+    my($class, $app, $env, $file) = @_;
 
     $file = eval { $app->save_settings_to_file($file) };
-    my $resp = Devel::hdb::Response->new('saveconfig', $env);
     if ($@) {
-        $resp->data({ failed => $@ });
+        return [ 400,
+                [ 'Content-Type' => 'text/html' ],
+                [ "Problem loading $file: $@" ] ];
     } else {
-        $resp->data({ success => 1, filename => $file });
+        return [ 204, [], [] ];
     }
-    return [ 200,
-            [ 'Content-Type' => 'application/json'],
-            [ $resp->encode() ]
-        ];
 }
 
 1;
@@ -66,15 +51,15 @@ Devel::hdb::App::Config - Load and save debugger configuration
 
 =over 4
 
-=item /saveconfig&f=<filename>
+=item POST /saveconfig/<filename>
 
-Save debugger configuration to the file given with request parameter 'f'.
-Breakpoint and line-actions are saved.
+Save debugger configuration to the given file.  Breakpoint and
+line-actions are saved.
 
-=item /loadconfig&f=<filename>
+=item POST /loadconfig/<filename>
 
-Loads debugger configuration from the file given with request parameter 'f'
-Breakpoint and line-actions are restored.
+Loads debugger configuration from the given file.  Breakpoint and
+line-actions are restored.
 
 =back
 

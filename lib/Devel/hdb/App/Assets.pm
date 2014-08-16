@@ -5,14 +5,15 @@ use warnings;
 
 use base 'Devel::hdb::App::Base';
 
-__PACKAGE__->add_route('get', qr(/db/(.*)), \&assets);
-__PACKAGE__->add_route('get', qr(/img/(.*)), \&assets);
-__PACKAGE__->add_route('get', '/', sub { assets(@_, 'debugger.html') });
+__PACKAGE__->add_route('get', qr(^/db/(.*)), \&assets);
+__PACKAGE__->add_route('get', qr(^/img/(.*)), \&assets);
+__PACKAGE__->add_route('get', '/debugger-gui', sub { assets(@_, 'debugger.html') });
 
 sub assets {
     my($class, $app, $env, $file) = @_;
 
     $file =~ s/\.\.//g;  # Remove ..  They're unnecessary and a security risk
+    $file =~ s/^\/debugger-gui//;
     my $file_path = $INC{'Devel/hdb.pm'};
     $file_path =~ s/\.pm$//;
     $file_path .= '/html/'.$file;
@@ -52,7 +53,7 @@ Devel::hdb::App::Assets - Handler for file assets
 =head1 DESCRIPTION
 
 Registers routes for GET request for /db/.* and /img/.* that serve up files
-located un the html subdirectory of Devel::hdb.  The GET / route returns the
+located un the html subdirectory of Devel::hdb.  The GET /debugger-gui route returns the
 file debugger.html.
 
 =head1 SEE ALSO

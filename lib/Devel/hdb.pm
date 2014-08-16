@@ -8,7 +8,7 @@ use Devel::hdb::TraceFollow;
 use IO::Socket::INET;
 use IO::File;
 
-our $VERSION = 0.13;
+our $VERSION = 0.20;
 
 sub import {
     my $class = shift;
@@ -154,7 +154,7 @@ in higher frames, select the appropriate frame from the tab on the left.
 
 The right side of the GUI shows watch expressions.  To add a new expression to
 the watch window, click on the "+".  To remove a watched expression, click on
-the "x" next to its name.  Composite types like Hashes and arrays have a blue
+the "x" next to its name.  Composite types like hashes and arrays have a blue
 circled number indicating how many elements belong to it.  To collapse/expand
 them, click the blue circle.
 
@@ -170,49 +170,27 @@ command-line debugger commands
 
 =over 4
 
-=item s
+=item s - Step in
 
-Step in
+=item n - Step over
 
-=item n
+=item <CR> - Repeat the last 's' or 'n'
 
-Step over
+=item r - Step out
 
-=item <CR>
+=item c - Continue/Run
 
-Repeat the last 's' or 'n'
+=item q - Quit/Exit
 
-=item r
+=item x - Add new watch expression
 
-Step out
+=item f - Add new file
 
-=item c
+=item . - Scroll the code window to show the current line
 
-Continue/Run
+=item L - Open the breakpoint manager
 
-=item q
-
-Quit/Exit
-
-=item x
-
-Add new watch expression
-
-=item f
-
-Add new file
-
-=item .
-
-Scroll the code window to show the current line
-
-=item L
-
-Open the breakpoint manager
-
-=item b
-
-Toggle a breakpoint on the current line
+=item b - Toggle a breakpoint on the current line
 
 =back
 
@@ -259,19 +237,19 @@ This package includes these third party libraries:
 
 =over
 
-=item *
-jQuery version 1.7.2 L<http://jquery.com/>
+=item * jQuery version 2.1.1 L<http://jquery.com/>
 
-=item *
-scrollTo jQuery plugin version 1.4.3.1 L<http://flesler.blogspot.com/2007/10/jqueryscrollto.html>
+=item * scrollTo jQuery plugin version 1.4.3.1 L<http://flesler.blogspot.com/2007/10/jqueryscrollto.html>
 
-=item *
-Twitter Bootstrap version 2.3.0 L<http://twitter.github.com/bootstrap/index.html>
+=item * Twitter Bootstrap version 2.3.0 L<http://twitter.github.com/bootstrap/index.html>
 
-=item *
-Handlebars version 1.0rc2 L<http://handlebarsjs.com/>
+=item * Handlebars version 1.0rc2 L<http://handlebarsjs.com/>
 
 =back
+
+=head1 SEE ALSO
+
+L<Devel::Chitin>, L<DB>, L<perldebguts>
 
 =head1 AUTHOR
 

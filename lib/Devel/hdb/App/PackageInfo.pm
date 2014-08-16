@@ -3,26 +3,38 @@ package Devel::hdb::App::PackageInfo;
 use strict;
 use warnings;
 
+use URI::Escape qw(uri_escape);
+
 use base 'Devel::hdb::App::Base';
 
-use Devel::hdb::Response;
-
-__PACKAGE__->add_route('get', qr(/pkginfo/((\w+)(::\w+)*)), \&pkginfo);
+__PACKAGE__->add_route('get', qr(/packageinfo/((\w+)(::\w+)*)), \&pkginfo);
 __PACKAGE__->add_route('get', qr(/subinfo/((\w+)(::\w+)*)), \&subinfo);
 
 # Get data about the packages and subs within the mentioned package
 sub pkginfo {
     my($class, $app, $env, $package) = @_;
 
-    my $resp = Devel::hdb::Response->new('pkginfo', $env);
-    my $sub_packages = _namespaces_in_package($package);
-    my @subs = grep { $app->subroutine_location("${package}::$_") }
+    my $stash_exists = do {
+        my $stash = "${package}::";
+        no strict 'refs';
+        scalar(%$stash);
+    };
+
+    unless ($stash_exists) {
+        return [404,
+                [ 'Content-Type' => 'text/html' ],
+                [ "Package $package not found" ] ];
+    }
+
+    my @sub_packages = map { { name => $_, href => '/packageinfo/' . uri_escape($_) } }
+                        _namespaces_in_package($package);
+    my @subs =  map { { name => $_, href => '/subinfo/' . uri_escape(join('::', $package, $_)) } }
+                grep { $app->subroutine_location("${package}::$_") }
                     @{ _subs_in_package($package) };
 
-    $resp->data({ packages => $sub_packages, subs => \@subs });
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $resp->encode() ]
+            [ $app->encode_json({ name => $package, packages => \@sub_packages, subroutines => \@subs }) ]
         ];
 }
 
@@ -30,18 +42,16 @@ sub pkginfo {
 sub subinfo {
     my($class, $app, $env, $subname) = @_;
 
-    my $resp = Devel::hdb::Response->new('subinfo', $env);
     my $loc = $app->subroutine_location($subname);
 
     if ($loc) {
-        my @keys = qw( filename line end source source_line );
+        my @keys = qw( filename line end source source_line package subroutine );
         my %data;
         @data{@keys} = map { $loc->$_ } @keys;
-        $resp->data(\%data);
 
         return [ 200,
                 [ 'Content-Type' => 'application/json' ],
-                [ $resp->encode() ],
+                [ $app->encode_json(\%data) ],
             ];
     } else {
         return [ 404,
@@ -55,13 +65,13 @@ sub _namespaces_in_package {
     my $pkg = shift;
 
     no strict 'refs';
-    return undef unless %{"${pkg}::"};
+    return () unless %{"${pkg}::"};
 
     my @packages =  sort
                     map { substr($_, 0, -2) }  # remove '::' at the end
                     grep { m/::$/ }
                     keys %{"${pkg}::"};
-    return \@packages;
+    return @packages;
 }
 
 sub _subs_in_package {
@@ -88,22 +98,49 @@ Devel::hdb::App::PackageInfo - Get information about packages and subroutines
 
 =over 4
 
-=item /pkginfo/<package>
+=item GET /packageinfo/<package>
 
-Returns a JSON-encoded hash with two keys: "packages" containing a list of
-namespaces within the requested package, and "subs" containing a list of
-debuggable subroutine names in the requested package.  Subroutines are
-considered debuggable is there is an entry in %DB::sub for them.
+Get information about the named package, or 'main::' if no package is given.
 
-=item /subinfo/<subname>
+Returns 200 and a JSON in the body:
+  {
+    name: String - package name
+    packages: [ // list of packages under this package
+        {
+            name: String - package name
+            href: URL (/packageinfo/<That::package::name>)
+        },
+        ...
+    ],
+    subroutines: [ // List of subroutine names in this package
+        {
+            name: String - subroutine name including package
+            href: URL (/subinfo/<That::package::subname>)
+        },
+        ...
+    ],
+  }
 
-Given a fully-qualified subroutine name, including package, in the format
-Package::SubPackage::subroutine, returns a JSON-encoded hash with these keys:
-  file   => Filename this subroutine was defined
-  start  => Line number in the file the subroutine starts
-  end    => Line in the file the subroutine ends
-  source => Original source file of the subroutine text
-  source_line => Line in the original source file
+Returns 400 if the named package is not a valid package name
+Returns 404 if the named package is not present
+
+=item GET /subinfo/<subname>
+
+Get information about the named subroutine.  If the subname has no package
+included, package main:: is assummed.
+
+Returns 200 and a JSON-encoded hash in the body with these keys:
+
+subroutine: String - subroutine name, not including package
+    package     => Package the subroutine is in
+    filename    => File the sub was defined
+    line        => What line the sub is defined
+    end         => Last line where the sub is defined
+    source      => If the sub was created in an eval, this is the file the
+                   eval happened in
+    source_line => Line the eval happened in
+
+Returns 404 if the given subroutine was not found.
 
 source and source_line can differ from file and start in the case of
 subroutines defined inside of a string eval.  In this case, "file" will

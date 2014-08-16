@@ -5,24 +5,56 @@ use warnings;
 
 use base 'Devel::hdb::App::Base';
 
-use Devel::hdb::Response;
+use URI::Escape;
 
+__PACKAGE__->add_route('get', '/', \&overview);
 __PACKAGE__->add_route('get', '/program_name', \&program_name);
 
 BEGIN {
     our $PROGRAM_NAME = $0;
 }
 
+sub overview {
+    my($class, $app, $env) = @_;
+
+    our $PROGRAM_NAME;
+
+    my %data = (
+        program_name => $PROGRAM_NAME,
+        perl_version => sprintf("v%vd", $^V),
+        source => join('/', '/source', URI::Escape::uri_escape($PROGRAM_NAME)),
+        loaded_files => '/source',
+        stack => '/stack',
+        breakpoints => '/breakpoints',
+        actions => '/actions',
+        stepin => '/stepin',
+        stepover => '/stepover',
+        stepout => '/stepout',
+        continue => '/continue',
+        eval => '/eval',
+        getvar => '/getvar',
+        packageinfo => '/packageinfo',
+        subinfo => '/subinfo',
+        exit => '/exit',
+        debugger_gui => '/debugger-gui',
+        status => '/status',
+        loadconfig => '/loadconfig',
+        saveconfig => '/saveconfig',
+    );
+
+    return [ 200,
+            [ 'Content-Type' => 'application/json' ],
+            [ $app->encode_json(\%data) ]
+        ];
+}
+
 sub program_name {
     my($class, $app, $env) = @_;
 
-    my $resp = Devel::hdb::Response->new('program_name', $env);
-
     our $PROGRAM_NAME;
-    $resp->data($PROGRAM_NAME);
 
     return [200, ['Content-Type' => 'text/plain'],
-                [ $resp->encode() ]
+                [ $app->encode_json({ program_name => $PROGRAM_NAME }) ],
         ];
 }
 
@@ -43,9 +75,10 @@ Registers a route used to get the name of the running program, $0
 
 =over 4
 
-=item /program_name
+=item GET /program_name
 
-Returns the program name as a string
+Returns 200 and a JSON-encoded hash with one key:
+  program_name => $0 when the program was started
 
 =back
 

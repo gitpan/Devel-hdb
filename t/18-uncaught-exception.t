@@ -3,49 +3,51 @@ use warnings;
 
 use lib 't';
 use HdbHelper;
-use WWW::Mechanize;
-use JSON;
+use Devel::hdb::Client;
 
 use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 4;
+    plan tests => 3;
 }
 
 my $url = start_test_program();
+my $client = Devel::hdb::Client->new(url => $url);
 
-my $json = JSON->new();
-my $stack;
+my $resp = $client->status();
+ok($resp, 'status');
+my $filename = $resp->{filename};
 
-my $mech = WWW::Mechanize->new();
-my $resp = $mech->get($url.'stack');
-ok($resp->is_success, 'Request stack position');
-$stack = $json->decode($resp->content);
-my $filename = $stack->{data}->[0]->{filename};
+$resp = $client->continue();
+delete @$resp{'filename','line','stack_depth'};
+is_deeply($resp,
+    { subroutine => 'Devel::hdb::App::__exception__',
+      running => 1,
+      events => [
+        {
+            type => 'exception',
+            package => 'main',
+            subroutine => 'main::do_die2',
+            filename => $filename,
+            line => 11,
+            value => "This is an uncaught exception at $filename line 11.\n",
+        },
+    ] },
+    'Stopped in caught exception sub');
 
-$resp = $mech->get($url.'continue');
-ok($resp->is_success, 'continue');
-# expecting 'stack', 'termination' messages
-my @messages = sort { $a->{type} cmp $b->{type} } @{ $json->decode($resp->content) };
-
-is($messages[0]->{data}->[0]->{subroutine},
-    'Devel::Chitin::exiting::at_exit',
+$resp = $client->continue();
+delete @$resp{'filename','line','stack_depth'};
+is_deeply($resp,
+    { subroutine => 'Devel::Chitin::exiting::at_exit',
+      running => 0,
+      events => [
+        {
+            type => 'exit',
+            value => 255,
+        },
+    ]},
     'Stopped in at_exit()');
-
-is_deeply($messages[1],
-    {   type => 'termination',
-        data => {
-            'package'   => 'main',
-            line        => 11,
-            filename    => $filename,
-            exception   => "This is an uncaught exception at $filename line 11.\n",
-            exit_code   => 255,
-            subroutine  => 'main::do_die2',
-        }
-    },
-    'Got termination/exception message');
-
 
 __DATA__
 eval { die "inside eval" };
@@ -60,4 +62,4 @@ sub do_die {
 sub do_die2 {
     die "This is an uncaught exception";
 }
-    
+

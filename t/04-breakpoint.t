@@ -3,59 +3,124 @@ use warnings;
 
 use lib 't';
 use HdbHelper;
-use WWW::Mechanize;
-use JSON;
+use Devel::hdb::Client;
 
 use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 12;
+    plan tests => 8;
 }
 
 my $url = start_test_program();
+my $client = Devel::hdb::Client->new(url => $url);
 
-my $json = JSON->new();
 my $stack;
-
-my $mech = WWW::Mechanize->new(autocheck => 0);
-my $resp = $mech->get($url.'stack');
-ok($resp->is_success, 'Request stack position');
-$stack = $json->decode($resp->content);
-my $filename = $stack->{data}->[0]->{filename};
-$stack = strip_stack($stack);
+my $resp = $client->stack();
+ok($resp, 'Request stack position');
+my $filename = $resp->[0]->{filename};
+$stack = strip_stack($resp);
 is_deeply($stack,
     [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 4, c=> 1});
-ok($resp->is_error, 'Cannot set breakpoint on unbreakable line');
-is($resp->code, 403, 'Error was Forbidden');
+subtest 'invalid breakpoints' => sub {
+    plan tests => 4;
 
-$resp = $mech->post("${url}breakpoint", { f => 'garbage', l=> 123, c => 1});
-ok($resp->is_error, 'Cannot set breakpoint on unknown file');
-is($resp->code, 404, 'Error was Not Found');
+    my $resp = eval { $client->create_breakpoint(filename => $filename, line => 4, code => 1) };
+    ok(!$resp && $@, 'Cannot set breakpoint on unbreakable line');
+    is($@->http_code, 403, 'Error was Forbidden');
 
-$resp = $mech->post("${url}breakpoint", { f => $filename, l => 3, c => 1});
-ok($resp->is_success, 'Set breakpoint for line 3');
+    $resp = eval { $client->create_breakpoint(filename => 'garbage', line => 123, code => 1) };
+    ok(!$resp && $@, 'Cannot set breakpoint on unknown file');
+    is($@->http_code, 404, 'Error was Not Found');
+};
 
+my $breakpoint_id;
+subtest 'create breakpoint' => sub {
+    plan tests => 1;
 
-$resp = $mech->get($url.'continue');
-ok($resp->is_success, 'continue');
-$stack = strip_stack($json->decode($resp->content));
-is_deeply($stack,
-    [ { line => 3, subroutine => 'main::MAIN' } ],
-    'Stopped on line 3');
+    $breakpoint_id = $client->create_breakpoint(filename => $filename, line => 3, code => 1);
+    ok($breakpoint_id, 'Set breakpoint for line 3');
+};
 
-$resp = $mech->get($url.'continue');
-ok($resp->is_success, 'continue');
-my $message = $json->decode($resp->content);
-is($message->[0]->{data}->[0]->{subroutine},
-    'Devel::Chitin::exiting::at_exit',
-    'Stopped in at_exit()');
-is_deeply($message->[1],
-    { type => 'termination', data => { exit_code => 0 } },
-    'Got termination message');
+subtest 'change breakpoint' => sub {
+    plan tests => 7;
+
+    my $resp = eval { $client->change_breakpoint($breakpoint_id, filename => 'garbage') };
+    ok(!$resp && $@, 'Cannot change breakpoint filename');
+    is($@->http_code, 403, 'Error was forbidden');
+
+    $resp = eval { $client->change_breakpoint($breakpoint_id, line => 123) };
+    ok(!$resp && $@, 'Cannot change breakpoint line');
+    is($@->http_code, 403, 'Error was forbidden');
+
+    $resp = $client->change_breakpoint($breakpoint_id, inactive => 1);
+    is_deeply($resp,
+            { filename => $filename, line => 3, code => 1, inactive => 1, href => $breakpoint_id },
+            'change prop inactive to 1');
+
+    TODO: {
+        local $TODO = q(Devel::Chitin doesn't let you change the code prop yet);
+        $resp = $client->change_breakpoint($breakpoint_id, code => 2);
+        is_deeply($resp,
+            { filename => $filename, line => 3, code => 2, inactive => 0, href => $breakpoint_id },
+            'change code prop');
+    };
+
+    $resp = $client->change_breakpoint($breakpoint_id, inactive => 0, code => 1);
+    is_deeply($resp,
+            { filename => $filename, line => 3, code => 1, inactive => 0, href => $breakpoint_id },
+            'change prop inactive and code back original values');
+};
+
+subtest 'get breakpoint' => sub {
+    plan tests => 3;
+
+    my $resp = eval { $client->get_breakpoint('garbage') };
+    ok(!$resp && $@, 'Cannot get unknown breakpoint');
+    is($@->http_code, 404, 'Error was Not Found');
+
+    $resp = $client->get_breakpoint($breakpoint_id);
+    is_deeply($resp,
+        { filename => $filename, line => 3, code => 1, inactive => 0, href => $breakpoint_id },
+        'Get breakpoint by id');
+};
+
+subtest 'stop at breakpoint' => sub {
+    plan tests => 2;
+
+    my $resp = $client->continue();
+    is_deeply($resp,
+        { filename => $filename, line => 3, subroutine => 'MAIN', running => 1, stack_depth => 1 },
+        'continue to line 3');
+
+    $resp = $client->continue();
+    my $stopped_filename = delete $resp->{filename};
+    my $stopped_line = delete $resp->{line};
+    my $stack_depth = delete $resp->{stack_depth};
+    is_deeply($resp,
+        {   subroutine => 'Devel::Chitin::exiting::at_exit',
+            running => 0,
+            events => [
+                { type => 'exit',
+                  value => 0,
+                },
+            ],
+        },
+        'continue to end');
+};
+
+subtest 'delete breakpoint' => sub {
+    plan tests => 3;
+
+    my $resp = eval { $client->delete_breakpoint('garbage') };
+    ok(!$resp && $@, 'Cannot delete unknown breakpoint');
+    is($@->http_code, 404, 'Error was Not Found');
+
+    $resp = $client->delete_breakpoint($breakpoint_id);
+    ok($resp, 'Delete previously added breakpoint');
+};
 
 
 __DATA__

@@ -6,26 +6,39 @@ use warnings;
 use base 'Devel::hdb::App::Base';
 
 use Plack::Request;
-use Devel::hdb::Response;
-use JSON;
+use Digest::MD5 qw();
+use Time::HiRes qw();
 
-__PACKAGE__->add_route('post', '/breakpoint', 'set');
-__PACKAGE__->add_route('get', '/breakpoint', 'get');
-__PACKAGE__->add_route('get', '/delete-breakpoint', 'delete');
+sub response_url_base() { '/breakpoints' };
+
+__PACKAGE__->add_route('post', response_url_base(), 'set');
+__PACKAGE__->add_route('get', qr{(/breakpoints/\w+)$}, 'get');
+__PACKAGE__->add_route('post', qr{(/breakpoints/\w+)$}, 'change');
+__PACKAGE__->add_route('delete', qr{(/breakpoints/\w+)$}, 'delete');
 __PACKAGE__->add_route('get', '/breakpoints', 'get_all');
 
-sub response_type() { 'breakpoint' };
-sub delete_response_type { 'delete-breakpoint' }
-sub actionable_getter() { 'get_breaks' }
 sub actionable_adder() { 'add_break' }
 sub actionable_remover() { 'remove_break' }
+sub actionable_type() { 'Devel::Chitin::Breakpoint' }
 
 {
-    my(%my_breakpoints);
+    my(%my_breakpoints, %bp_to_id);
     sub storage { \%my_breakpoints; }
+    sub lookup_id {
+        my($class, $bp) = @_;
+        $bp_to_id{$bp};
+    }
+    sub save_id {
+        my($class, $bp, $id) = @_;
+        $bp_to_id{$bp} = $id;
+    }
+    sub forget_id {
+        my($class, $bp) = @_;
+        delete $bp_to_id{$bp};
+    }
 }
 
-sub _file_or_line_is_invalid {
+sub is_file_or_line_invalid {
     my($class, $app, $filename, $line) = @_;
 
     if (! $app->is_loaded($filename)) {
@@ -39,74 +52,99 @@ sub _file_or_line_is_invalid {
 sub set {
     my($class, $app, $env) = @_;
 
-    my $params = Plack::Request->new($env)->parameters;
-    my($filename, $line) = @$params{'f','l'};
+    my $body = $class->_read_request_body($env);
+    my $params = $app->decode_json( $body );
 
-    if (my $error = $class->_file_or_line_is_invalid($app, $filename, $line)) {
+    if (my $error = $class->is_file_or_line_invalid($app, @$params{'filename','line'})) {
         return $error;
     }
 
-    my $resp = Devel::hdb::Response->new($class->response_type, $env);
-
-    my %req;
-    @req{'file','line'} = @$params{'f','l'};
-    $req{code} = $params->{c} if (exists $params->{'c'});
-    $req{inactive} = $params->{ci} if (exists $params->{'ci'});
-
-    my $resp_data = $class->set_and_respond($app, %req);
-    $resp->data( $resp_data );
+    my $resp_data = $class->set_and_respond($app, $params);
 
     return [ 200,
             [ 'Content-Type' => 'application/json' ],
-            [ $resp->encode() ]
+            [ $app->encode_json($resp_data) ],
           ];
 }
 
-sub delete {
-    my($class, $app, $env) = @_;
+sub change {
+    my($class, $app, $env, $id) = @_;
 
-    my $params = Plack::Request->new($env)->parameters;
-    my($file, $line) = @$params{'f','l'};
+    my $body = $class->_read_request_body($env);
+    my $params = $app->decode_json( $body );
 
-    if (my $error = $class->_file_or_line_is_invalid($app, $file, $line)) {
-        return $error;
+    foreach my $prop (qw( filename line )) {
+        if (exists($params->{$prop})) {
+            return [ 403,
+                     ['Content-Type' => 'text/html'],
+                     ["Cannot change property $prop"] ];
+        }
     }
 
-    my $bp = $class->get_stored($file, $line);
+    my $bp = $class->get_stored($id);
     unless ($bp) {
         return [ 404,
                     ['Content-Type' => 'text/html'],
-                    ["No breakpoint on line $line of $file"]];
+                    ["No breakpoint $id"] ];
+    }
+
+    foreach my $prop ( keys %$params ) {
+        $bp->$prop( $params->{$prop} );
+    }
+
+    my $rv = { href => $id, filename => $bp->file };
+    foreach my $prop (qw( line code inactive)) {
+        $rv->{$prop} = $bp->$prop;
+    }
+
+    return [ 200,
+                [ 'Content-Type', 'application/json'],
+                [ $app->encode_json($rv) ] ];
+}
+
+sub delete {
+    my($class, $app, $env, $id) = @_;
+
+    my $bp = $class->get_stored($id);
+    unless ($bp) {
+        return [ 404,
+                    ['Content-Type' => 'text/html'],
+                    ["No breakpoint $id"] ];
     }
     my $remover = $class->actionable_remover;
     $app->$remover($bp);
-    $class->delete_stored($file, $line);
+    $class->delete_stored($id);
+    $class->forget_id($bp);
 
-    my $resp = Devel::hdb::Response->new($class->delete_response_type, $env);
-    $resp->data( { filename => $file, lineno => $line } );
-    return [ 200,
-            [ 'Content-Type' => 'application/json' ],
-            [ $resp->encode() ]
+    return [ 204,
+            [ ],
+            [ ],
           ];
 }
 
 sub set_and_respond {
-    my($class, $app, %params) = @_;
+    my($class, $app, $params) = @_;
 
-    my($file, $line, $code, $inactive) = @params{'file','line','code','inactive'};
+    my($file, $line, $code, $inactive) = @$params{'filename','line','code','inactive'};
+    my $href = join('/',
+                $class->response_url_base,
+                Digest::MD5::md5_hex($file, $line, Time::HiRes::time)
+            );
 
-    my $set_inactive = exists($params{inactive})
+    my $set_inactive = exists($params->{inactive})
                         ? sub { shift->inactive($inactive) }
                         : sub {};
 
     my $changer;
     my $adder = $class->actionable_adder;
-    if (exists $params{code}) {
+    if (exists $params->{code}) {
         # setting a breakpoint
         $changer = sub {
-                my $bp = $app->$adder(%params);
+                $params->{file} = delete $params->{filename};
+                my $bp = $app->$adder(%$params);
                 $set_inactive->($bp);
-                $class->set_stored($file, $line, $bp);
+                $class->save_id($bp, $href);
+                $class->set_stored($href, $bp);
             };
     } else {
         # changing a breakpoint
@@ -124,76 +162,72 @@ sub set_and_respond {
     }
 
     my $bp = $changer->();
-    my $resp_data = { filename => $file, lineno => $line };
-    @$resp_data{'code','inactive'} = ( $bp->code, $bp->inactive );
+    my $resp_data = {   filename => $file,
+                        line => $line,
+                        code => $bp->code,
+                        inactive => $bp->inactive,
+                        href => $href,
+                    };
     return $resp_data;
 }
 
 
 sub get {
-    my($class, $app, $env) = @_;
+    my($class, $app, $env, $id) = @_;
 
-    my $req = Plack::Request->new($env);
-    my $filename = $req->param('f');
-    my $line = $req->param('l');
+    my $bp = $class->get_stored($id);
+    my %bp_data = ( href => $class->lookup_id($bp) );
+    @bp_data{'href','filename','line','code','inactive'}
+        = ( $id,
+            map { $bp->$_ } qw(file line code inactive) );
 
-    my $resp = Devel::hdb::Response->new('breakpoint', $env);
-    my $getter = $class->actionable_getter;
-    my($bp) = $app->$getter(file => $filename, line => $line);
-    my $resp_data = { filename => $filename, lineno => $line };
-    if ($bp) {
-        $resp_data->{code} = $bp->code;
-        $bp->inactive and do { $resp_data->{inactive} = 1 };
-    }
-    $resp->data($resp_data);
-
-    return [ 200, ['Content-Type' => 'application/json'],
-            [ $resp->encode() ]
+    return [ 200,
+            ['Content-Type' => 'application/json'],
+            [ $app->encode_json(\%bp_data) ],
           ];
 }
 
 sub get_all {
     my($class, $app, $env) = @_;
-
     my $req = Plack::Request->new($env);
-    my $filename = $req->param('f');
-    my $line = $req->param('l');
-    my $rid = $req->param('rid');
 
-    my @bp;
-    my $getter = $class->actionable_getter;
-    my $response_type = $class->response_type;
-    foreach my $bp ( $app->$getter( file => $filename, line => $line) ) {
-        my $this = { type => $response_type };
-        $this->{rid} = 1 if (defined $rid);
-        $this->{data} = {   filename => $bp->file,
-                            lineno => $bp->line,
-                            code => $bp->code,
-                        };
-        $this->{data}->{inactive} = 1 if $bp->inactive;
-        push @bp, $this;
+    my %filters;
+    foreach my $filter ( qw( line code inactive ) ) {
+        $filters{$filter} = $req->param($filter) if defined $req->param($filter);
     }
+
+    my @bp_list =
+            map { my %bp_data = (href => $class->lookup_id($_));
+                    @bp_data{'filename','line','code','inactive'}
+                        = @$_{'file','line','code','inactive'};
+                    \%bp_data;
+                }
+            map { $class->actionable_type->get(file => $_, %filters) }
+            defined($req->param('filename'))
+                ? ($req->param('filename'))
+                : $app->loaded_files;
+
     return [ 200, ['Content-Type' => 'application/json'],
-            [ JSON::encode_json( \@bp ) ]
+            [ JSON::encode_json( \@bp_list ) ]
         ];
 }
 
 sub delete_stored {
-    my($class, $file, $line) = @_;
+    my($class, $id) = @_;
     my $s = $class->storage;
-    delete $s->{$file}->{$line};
+    delete $s->{$id};
 }
 
 sub get_stored {
-    my($class, $file, $line) = @_;
+    my($class, $id) = @_;
     my $s = $class->storage;
-    return $s->{$file}->{$line};
+    return $s->{$id};
 }
 
 sub set_stored {
-    my($class, $file, $line, $item) = @_;
+    my($class, $id, $item) = @_;
     my $s = $class->storage;
-    $s->{$file}->{$line} = $item;
+    $s->{$id} = $item;
 }
 
 
@@ -220,47 +254,57 @@ Unconditional breakpoints are usually stored as "1".
 
 =over 4
 
-=item GET /breakpoint
+=item GET /breakpoints
 
 Get breakpoint information about a particular file and line number.  Accepts
-these parameters:
-  f     File name
-  l     Line number
+these parameters as filters to limit the returned breakpoint data:
+  filename  File name
+  line      Line number
+  code      Perl code string
+  inactive  True if the breakpoint is inactive
 
-Returns a JSON-encoded hash with these keys:
+Returns 200 and a JSON-encoded array containing hashes with these keys:
   filename  => File name
   lineno    => Line number
   code      => Breakpoint condition, or 1 for an unconditional break
   inactive  => 1 (yes) or undef (no), whether this breakpoint
                         is disabled/inactive
+  href      => URL string to uniquely identify this breakpoint
 
-=item POST /breakpoint
+=item POST /breakpoints
 
-Set a breakpoint.  Accepts these parameters:
-  f     File name
-  l     Line number
-  c     Breakpoint condition code.  This can be a bit of Perl code to
-        represent a conditional breakpoint, or "1" for an unconditional
-        breakpoint.
-  ci    Set to true to make the breakpoint condition inactive, false to
-        clear the setting.
+Create a breakpoint.  Breakpoint details must appear in the body as JSON hash
+with these keys:
+  filename  File name
+  line      Line number
+  code      Breakpoint condition code.  This can be a bit of Perl code to
+            represent a conditional breakpoint, or "1" for an unconditional
+            breakpoint.
+  inactive  Set to true to make the breakpoint condition inactive, false to
+            clear the setting.
 
-It responds with the same JSON-encoded hash as GET /breakpoint.  If the
-condition is empty/false (to clear the breakpoint) the response will only
-include the keys 'filename' and 'lineno'.
+It responds 200 with the same JSON-encoded hash as GET /breakpoints.
+Returns 403 if the line is not breakable.
+Returns 404 if the filename is not loaded.
 
-=item GET /delete-breakpoint
+=item GET /breakpoints/<id>
 
-Delete a breakpoint on a particular file ane line number.  Requires these
-parameters:
-  f     File name
-  l     Line number
+Return the same JSON-encoded hash as GET /breakpoints.
+Returns 404 if there is no breakpoint with that id.
 
-=item GET /breakpoints
+=item POST /breakpoints/<id>
 
-Request data about all breakpoints.  Return a JSON-encoded array.  Each
-item in the array is a hash with the same information returned by GET
-/breakpoint.
+Change a breakpoint property.  The body contains a JSON hash of which keys to
+change, along with their new values.  Returns 200 and the same JSON hash
+as GET /breakpoints, including the new values.
+
+Returns 403 if the given property cannot be changed.
+Returns 404 if there is no breakpoint with that id.
+
+=item DELETE /breakpoints/<id>
+
+Delete the breakpoint with the given id.  Returns 204 if successful.
+Returns 404 if there is no breakpoint with that id.
 
 =back
 

@@ -8,32 +8,17 @@ sub new {
     return bless {}, $class;
 }
 
-sub get($$&) {
-    my($self, $path, $sub) = @_;
-
-    $self->{GET} ||= [];
-    push @{ $self->{GET}}, [$path, $sub];
-}
-
-sub post($$&) {
-    my($self, $path, $sub) = @_;
-
-    $self->{POST} ||= [];
-    push @{ $self->{POST}}, [$path, $sub];
-}
-
-sub put($$&) {
-    my($self, $path, $sub) = @_;
-
-    $self->{PUT} ||= [];
-    push @{ $self->{PUT}}, [$path, $sub];
-}
-
-sub delete($$&) {
-    my($self, $path, $sub) = @_;
-
-    $self->{DELETE} ||= [];
-    push @{ $self->{DELETE}}, [$path, $sub];
+foreach my $method ( qw(get post put delete head) ) {
+    my $key = uc($method);
+    my $sub = qq(
+        sub {
+            my(\$self, \$path, \$sub) = \@_;
+            my \$list = \$self->{$key} ||= [];
+            push \@\$list, [ \$path, \$sub ];
+        };
+    );
+    no strict 'refs';
+    *$method = eval $sub;
 }
 
 sub route($$) {
@@ -41,6 +26,7 @@ sub route($$) {
     my $env = shift;
 
     my $req_method = $env->{REQUEST_METHOD};
+    print STDERR "Incoming request: $req_method ",$env->{PATH_INFO},"\n" if ($ENV{HDB_DEBUG_MSG});
     return unless exists $self->{$req_method};
     my $matchlist = $self->{$req_method};
 

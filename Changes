@@ -1,3 +1,9 @@
+16 Aug 2014 - v0.20
+    * Back-end now uses a documented REST api
+    * Added module to communicate with the api - Devel::hdb::Client
+    * Rewritten GUI to use the REST api
+    * Faster page loading when the stack is deep
+
 1 July 2014 - v0.13
     * Extracted a module to transform a Perl data structure into a serializable
       format: Data::Transform::ExplicitMetadata

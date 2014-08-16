@@ -3,39 +3,21 @@ use warnings;
 
 use lib 't';
 use HdbHelper;
-use WWW::Mechanize;
-use JSON;
+use Devel::hdb::Client;
 
 use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 28;
+    plan tests => 4;
 }
 
 my $url = start_test_program();
+my $client = Devel::hdb::Client->new(url => $url);
 
-my $json = JSON->new();
-my $stack;
-
-my $mech = WWW::Mechanize->new();
-my $resp = $mech->get($url.'stack');
-ok($resp->is_success, 'Request stack position');
-
-$stack = $json->decode($resp->content);
-my $filename = $stack->{data}->[0]->{filename};
-$stack = strip_stack($stack);
-is_deeply($stack,
-    [ { line => 1, subroutine => 'main::MAIN' } ],
-    'Stopped on line 1');
-
-$resp = $mech->get($url.'continue');
-ok($resp->is_success, 'continue');
-
-$resp = $mech->get($url.'stack');
-ok($resp->is_success, 'get stack');
-$stack = $json->decode($resp->content);
-$stack = $stack->{data};
+my $resp = $client->continue();
+ok($resp, 'continue to breakpoint');
+my $filename = $resp->{filename};
 
 my @expected = (
     {   package     => 'Bar',
@@ -51,9 +33,10 @@ my @expected = (
         autoload    => undef,
         subname     => 'baz',
         args        => [],
+        href        => '/stack/0',
     },
     {   package     => 'Bar',
-        filename    => qr/\(eval \d+\)\[$filename:10\]/,
+        filename    => qr/\(eval \d+\)\[\Q$filename\E:10\]/,
         subroutine  => qr/\(eval\)/,
         line        => 1,          # It's line 1 if the eval-ed text
         hasargs     => 0,
@@ -65,6 +48,7 @@ my @expected = (
         autoload    => undef,
         subname     => qr/\(eval\)/,
         args        => [],
+        href        => '/stack/1',
     },
     {   package     => 'Bar',
         filename    => $filename,
@@ -79,6 +63,7 @@ my @expected = (
         autoload    => undef,
         subname     => qr/\(eval\)/,
         args        => [],
+        href        => '/stack/2',
     },
     {   package     => 'Bar',
         filename    => $filename,
@@ -93,6 +78,7 @@ my @expected = (
         autoload    => undef,
         subname     => 'bar',
         args        => [],
+        href        => '/stack/3',
     },
     {   package     => 'main',
         filename    => $filename,
@@ -107,6 +93,7 @@ my @expected = (
         autoload    => undef,
         subname     => 'foo',
         args        => [1,2,3],
+        href        => '/stack/4',
     },
     {   package     => 'main',
         filename    => $filename,
@@ -121,28 +108,78 @@ my @expected = (
         autoload    => undef,
         subname     => 'MAIN',
         args        => [],
+        href        => '/stack/5',
     },
 );
-for (my $i = 0; $i < @expected; $i++) {
-    delete $stack->[$i]->{hints};
-    delete $stack->[$i]->{bitmask};
-    delete $stack->[$i]->{level};
 
-    _compare_strings(   delete $stack->[$i]->{subroutine},
-                        delete $expected[$i]->{subroutine},
-                        "subroutine matches for level $i");
+is($client->stack_depth, scalar(@expected), 'stack depth');
 
-    _compare_strings(   delete $stack->[$i]->{subname},
-                        delete $expected[$i]->{subname},
-                        "subname matches for level $i");
+subtest 'with sub params' => sub {
+    plan tests => 78;
 
-    _compare_strings(   delete $stack->[$i]->{filename},
-                        delete $expected[$i]->{filename},
-                        "filename matches for level $i");
+    my $stack = $client->stack();
 
-    is_deeply($stack->[$i],
-                $expected[$i],
-                "Other stack frame matches for frame $i");
+    my $stack_frame_getter = sub { $client->stack_frame($_[0]) };
+    check_all_frames($stack, $stack_frame_getter, @expected);
+};
+
+subtest 'without sub params' => sub {
+    plan tests => 78;
+
+    my $stack = $client->stack(exclude_sub_params => 1);
+
+    my @expected_without_args = map { my %copy = %$_; undef($copy{args}); \%copy } @expected;
+    my $stack_frame_getter = sub { $client->stack_frame($_[0], exclude_sub_params => 1) };
+    check_all_frames($stack, $stack_frame_getter, @expected_without_args);
+};
+
+sub check_all_frames {
+    my($stack, $stack_frame_getter, @expected) = @_;
+
+    for (my $i = 0; $i < @expected; $i++) {
+        delete $stack->[$i]->{hints};
+        delete $stack->[$i]->{bitmask};
+        delete $stack->[$i]->{level};
+
+        my $serial = delete $stack->[$i]->{serial};
+        ok($serial, "Frame $i has serial $serial");
+
+        _compare_frames($stack->[$i], $expected[$i], $i);
+
+        my $frame = $stack_frame_getter->($i);
+        ok($frame, "stack_frame() for $i");
+        is(delete($frame->{serial}), $serial, 'serial matches');
+
+        delete @$frame{'hints','bitmask','level'};
+        _compare_frames($frame, $expected[$i], $i);
+
+        my($head_serial, $head_line) = $client->stack_frame_signature($i);
+        is($head_serial, $serial, 'Frame signature serial matches');
+        is($head_line, $expected[$i]->{line}, 'Frame signature line matches');
+    }
+}
+
+sub _compare_frames {
+    my($frame_in, $expected_in, $level) = @_;
+
+    my %frame = %$frame_in;
+    my %expected = %$expected_in;
+
+    _compare_strings(   delete $frame{subroutine},
+                        delete $expected{subroutine},
+                        "subroutine matches for level $level");
+
+    _compare_strings(   delete $frame{subname},
+                        delete $expected{subname},
+                        "subname matches for level $level");
+
+    _compare_strings(   delete $frame{filename},
+                        delete $expected{filename},
+                        "filename matches for level $level");
+
+    is_deeply(\%frame,
+                \%expected,
+                "Other stack frame matches for frame $level");
 }
 
 

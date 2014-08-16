@@ -3,64 +3,67 @@ use warnings;
 
 use lib 't';
 use HdbHelper;
-use WWW::Mechanize;
-use JSON;
+use Devel::hdb::Client;
 
 use Test::More;
 if ($^O =~ m/^MS/) {
     plan skip_all => 'Test hangs on Windows';
 } else {
-    plan tests => 12;
+    plan tests => 11;
 }
 
 my $url = start_test_program();
+my $client = Devel::hdb::Client->new(url => $url);
 
-my $json = JSON->new();
 my $stack;
 
-my $mech = WWW::Mechanize->new();
-my $resp = $mech->get($url.'stack');
-ok($resp->is_success, 'Request stack position');
-$stack = strip_stack($json->decode($resp->content));
+my $resp = $client->stack();
+ok($resp, 'Request stack position');
+my $filename = $resp->[0]->{filename};
+$stack = strip_stack($resp);
 is_deeply($stack,
     [ { line => 1, subroutine => 'main::MAIN' } ],
     'Stopped on line 1');
 
-$resp = $mech->get($url.'stepin');
-ok($resp->is_success, 'step in');
-$stack = strip_stack($json->decode($resp->content));
+$resp = $client->stepin();
+is_deeply($resp,
+    { filename => $filename, line => 2, subroutine => 'MAIN', running => 1, stack_depth => 1 },
+    'step in');
+$stack = strip_stack($client->stack);
 is_deeply($stack,
     [ { line => 2, subroutine => 'main::MAIN' } ],
     'Stopped on line 2');
 
-$resp = $mech->get($url.'stepin');
-ok($resp->is_success, 'step in');
-$stack = strip_stack($json->decode($resp->content));
+$resp = $client->stepin();
+is_deeply($resp,
+    { filename => $filename, line => 6, subroutine => 'main::foo', running => 1, stack_depth => 2 },
+    'step in');
+$stack = strip_stack($client->stack);
 is_deeply($stack,
   [ { line => 6, subroutine => 'main::foo' },
     { line => 2, subroutine => 'main::MAIN' } ],
     'Stopped on line 6, frame above is line 2');
 
-$resp = $mech->get($url.'stepin');
-ok($resp->is_success, 'step in');
-$stack = strip_stack($json->decode($resp->content));
+$resp = $client->stepin();
+is_deeply($resp,
+    { filename => $filename, line => 3, subroutine => 'MAIN', running => 1, stack_depth => 1 },
+    'step in');
+$stack = strip_stack($client->stack);
 is_deeply($stack,
   [ { line => 3, subroutine => 'main::MAIN' } ],
     'Stopped on line 3');
 
-$resp = $mech->get($url.'stepin');
-ok($resp->is_success, 'step in');
-$stack = strip_stack($json->decode($resp->content));
+$resp = $client->stepin();
+is_deeply($resp,
+    { filename => $filename, line => 4, subroutine => 'MAIN', running => 1, stack_depth => 1 },
+    'step in');
+$stack = strip_stack($client->stack);
 is_deeply($stack,
   [ { line => 4, subroutine => 'main::MAIN' } ],
     'Stopped on line 4');
 
-$resp = $mech->get($url.'stepin');
-ok($resp->is_success, 'step in');
-$stack = strip_stack($json->decode($resp->content));
-is_deeply($stack->[0],
-  { line => 9, subroutine => 'main::END' },
-    'Stopped on line 9, in END block');
+$resp = $client->stepin();
+like($resp->{subroutine}, qr(::END$), 'step-in ended up in an END block');
 
 
 __DATA__
