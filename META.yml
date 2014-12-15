@@ -24,7 +24,6 @@ requires:
   Data::Dumper: '0'
   Data::Transform::ExplicitMetadata: '0'
   Devel::Chitin: '0.05'
-  Devel::hdb::App::Watchpoint: '0'
   Digest::MD5: '0'
   Exception::Class: '0'
   Exporter: '0'
@@ -45,5 +44,5 @@ requires:
   vars: '0'
   warnings: '0'
 resources:
-  repository: https://github.com/amb43790/Devel-hdb.git
-version: '0.21'
+  repository: https://github.com/brummett/Devel-hdb.git
+version: '0.21001'

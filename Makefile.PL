@@ -24,7 +24,6 @@ my %WriteMakefileArgs = (
     "Data::Dumper" => 0,
     "Data::Transform::ExplicitMetadata" => 0,
     "Devel::Chitin" => "0.05",
-    "Devel::hdb::App::Watchpoint" => 0,
     "Digest::MD5" => 0,
     "Exception::Class" => 0,
     "Exporter" => 0,
@@ -54,7 +53,7 @@ my %WriteMakefileArgs = (
     "Test::More" => 0,
     "lib" => 0
   },
-  "VERSION" => "0.21",
+  "VERSION" => "0.21001",
   "test" => {
     "TESTS" => "t/*.t"
   }
@@ -66,7 +65,6 @@ my %FallbackPrereqs = (
   "Data::Dumper" => 0,
   "Data::Transform::ExplicitMetadata" => 0,
   "Devel::Chitin" => "0.05",
-  "Devel::hdb::App::Watchpoint" => 0,
   "Digest::MD5" => 0,
   "Exception::Class" => 0,
   "Exporter" => 0,
